@@ -7,6 +7,19 @@ import { Honcho } from "@honcho-ai/sdk";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginState } from "../state.js";
 import { OWNER_ID } from "../state.js";
+import { buildSessionKey, extractParentAgentKey, isSubagentSession } from "../helpers.js";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: unknown; status?: unknown; statusCode?: unknown; message?: unknown };
+  if (candidate.name === "RateLimitError") return true;
+  if (candidate.status === 429 || candidate.statusCode === 429) return true;
+  return typeof candidate.message === "string" && /rate limit/i.test(candidate.message);
+}
 
 export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
   api.registerCli(
@@ -205,6 +218,10 @@ export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
             ]);
 
             const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5MB safety cap
+            const UPLOAD_MIN_INTERVAL_MS = 250; // Keep below Honcho's 5 requests/second limit
+            const UPLOAD_MAX_ATTEMPTS = 5;
+            const UPLOAD_RETRY_BASE_MS = 400;
+            let lastUploadAt = 0;
 
             let uploadCount = 0;
             for (const { filePath, peer } of detected) {
@@ -223,7 +240,26 @@ export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
               }
               const content = await fs.promises.readFile(filePath);
               const targetPeer = peer === "owner" ? ownerPeerSetup : agentPeerSetup;
-              await migrationSession.uploadFile({ filename, content, content_type }, targetPeer, {});
+              let attempt = 0;
+              while (true) {
+                const elapsedSinceLastUpload = Date.now() - lastUploadAt;
+                const waitMs = Math.max(0, UPLOAD_MIN_INTERVAL_MS - elapsedSinceLastUpload);
+                if (waitMs > 0) await sleep(waitMs);
+
+                try {
+                  await migrationSession.uploadFile({ filename, content, content_type }, targetPeer, {});
+                  lastUploadAt = Date.now();
+                  break;
+                } catch (error) {
+                  if (!isRateLimitError(error) || attempt >= UPLOAD_MAX_ATTEMPTS - 1) {
+                    throw error;
+                  }
+                  const retryMs = UPLOAD_RETRY_BASE_MS * (2 ** attempt);
+                  console.log(`  ! Rate limited, retrying in ${retryMs}ms: ${filePath}`);
+                  attempt++;
+                  await sleep(retryMs);
+                }
+              }
               console.log(`  ✓ Uploaded: ${filePath}`);
               uploadCount++;
             }
@@ -249,6 +285,136 @@ export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
             console.log(`  Agent peers mapped: ${Object.keys(state.agentPeerMap).join(", ") || "(none)"}`);
           } catch (error) {
             console.error(`Failed to connect: ${error}`);
+          }
+        });
+
+      cmd
+        .command("doctor")
+        .description("Check agent-scoped peer/session health")
+        .option("--session-key <key>", "Optional OpenClaw session key to validate")
+        .option("--provider <provider>", "Message provider used for session key reconstruction", "unknown")
+        .action(async (options: { sessionKey?: string; provider: string }) => {
+          try {
+            await state.ensureInitialized();
+            const configuredAgentIds = Array.isArray(api.config?.agents?.list)
+              ? api.config.agents.list
+                  .map((a: { id?: string }) => (a?.id ?? "").toLowerCase().trim())
+                  .filter(Boolean)
+              : [];
+
+            const candidateIds = new Set<string>([
+              state.resolveDefaultAgentId(),
+              ...configuredAgentIds,
+              ...Object.keys(state.agentPeerMap),
+            ]);
+
+            if (candidateIds.size === 0) {
+              console.log("No agent IDs found in config or metadata.");
+              return;
+            }
+
+            console.log("Honcho agent/session health");
+            console.log(`  Workspace: ${state.cfg.workspaceId}`);
+            console.log(`  Base URL: ${state.cfg.baseUrl}`);
+            console.log(`  Owner peer: ${OWNER_ID}`);
+            console.log("  Model: one session = one owning agent (plus optional subagent child sessions)");
+            console.log("  Expectation: no cross-agent observations between peer agents");
+            console.log(`  Agent IDs checked: ${Array.from(candidateIds).join(", ")}`);
+
+            let issues = 0;
+            for (const id of candidateIds) {
+              const peer = await state.getAgentPeer(id);
+              const peerMeta = await peer.getMetadata();
+              const mappedPeerId = state.agentPeerMap[id];
+              const metaAgentId = typeof peerMeta?.agentId === "string" ? peerMeta.agentId : undefined;
+              const mappingOk = mappedPeerId === peer.id;
+              const metadataOk = metaAgentId === id;
+
+              if (!mappingOk || !metadataOk) issues++;
+
+              console.log(
+                `  - ${id}: peer="${peer.id}" map=${mappingOk ? "ok" : "mismatch"} metadata.agentId=${metaAgentId ?? "(missing)"}`
+              );
+            }
+
+            if (options.sessionKey) {
+              console.log("\nSession metadata validation");
+              console.log(`  OpenClaw session key: ${options.sessionKey}`);
+
+              const honchoSessionKey = buildSessionKey({
+                sessionKey: options.sessionKey,
+                messageProvider: options.provider,
+              });
+              console.log(`  Honcho session key: ${honchoSessionKey}`);
+
+              const ownerMatch = options.sessionKey.match(/^agent:([^:]+):/);
+              const ownerAgentFromKey = ownerMatch?.[1]?.toLowerCase().trim();
+              const keyIsSubagent = isSubagentSession({ sessionKey: options.sessionKey });
+              const parentAgentKey = extractParentAgentKey(options.sessionKey);
+
+              try {
+                const session = await state.honcho.session(honchoSessionKey);
+                const sessionMeta = await session.getMetadata();
+                const sessionAgentId =
+                  typeof sessionMeta.agentId === "string"
+                    ? sessionMeta.agentId.toLowerCase().trim()
+                    : undefined;
+                const metaIsSubagent = Boolean(sessionMeta.isSubagent);
+                const metaParentKey =
+                  typeof sessionMeta.parentAgentKey === "string" ? sessionMeta.parentAgentKey : undefined;
+
+                if (!sessionAgentId) {
+                  issues++;
+                  console.log("  - session metadata.agentId: missing");
+                } else if (ownerAgentFromKey && sessionAgentId !== ownerAgentFromKey) {
+                  issues++;
+                  console.log(
+                    `  - session metadata.agentId: mismatch (key=${ownerAgentFromKey}, metadata=${sessionAgentId})`
+                  );
+                } else {
+                  console.log(`  - session metadata.agentId: ok (${sessionAgentId})`);
+                }
+
+                if (keyIsSubagent) {
+                  if (!metaIsSubagent) {
+                    issues++;
+                    console.log("  - session metadata.isSubagent: expected true, got false");
+                  } else {
+                    console.log("  - session metadata.isSubagent: ok");
+                  }
+
+                  if (!metaParentKey) {
+                    issues++;
+                    console.log("  - session metadata.parentAgentKey: missing");
+                  } else if (parentAgentKey && metaParentKey !== parentAgentKey) {
+                    issues++;
+                    console.log(
+                      `  - session metadata.parentAgentKey: mismatch (key=${parentAgentKey}, metadata=${metaParentKey})`
+                    );
+                  } else {
+                    console.log(`  - session metadata.parentAgentKey: ok (${metaParentKey})`);
+                  }
+                } else if (metaIsSubagent) {
+                  issues++;
+                  console.log("  - session metadata.isSubagent: unexpected true for non-subagent key");
+                } else {
+                  console.log("  - session metadata.isSubagent: ok (false)");
+                }
+              } catch (error) {
+                issues++;
+                console.log(`  - session lookup failed: ${error}`);
+              }
+            }
+
+            if (issues > 0) {
+              console.log(`\nDetected ${issues} issue(s).`);
+              process.exitCode = 1;
+            } else {
+              console.log("\nNo agent/session health issues detected.");
+            }
+          } catch (error) {
+            console.error(`Doctor check failed: ${error}`);
+            process.exitCode = 1;
           }
         });
 

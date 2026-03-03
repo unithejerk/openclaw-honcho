@@ -2,7 +2,12 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginState } from "../state.js";
 import { OWNER_ID } from "../state.js";
-import { buildSessionKey, isSubagentSession, extractParentAgentKey, extractMessages } from "../helpers.js";
+import {
+  buildSessionKey,
+  isSubagentSession,
+  extractParentAgentKey,
+  extractMessages,
+} from "../helpers.js";
 
 export function registerCaptureHook(api: OpenClawPluginApi, state: PluginState): void {
   api.on("agent_end", async (event, ctx) => {
@@ -34,6 +39,18 @@ export function registerCaptureHook(api: OpenClawPluginApi, state: PluginState):
       }
 
       const lastSavedIndex = (meta.lastSavedIndex as number) ?? 0;
+
+      if (isSubagent) {
+        const parentAgentKey = extractParentAgentKey(ctx.sessionKey);
+        if (!parentAgentKey) {
+          api.logger.warn?.(
+            `[honcho] Subagent session missing parent agent key: ${ctx.sessionKey ?? "(missing)"}`
+          );
+        }
+        api.logger.warn?.(
+          `[honcho] Subagent session parent id: ${parentAgentKey}`
+        );
+      }
 
       await session.addPeers([
         [OWNER_ID, { observeMe: true, observeOthers: false }],
