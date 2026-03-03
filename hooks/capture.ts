@@ -8,6 +8,7 @@ import {
   extractParentAgentKey,
   extractMessages,
 } from "../helpers.js";
+import type { MessageInput } from "@honcho-ai/sdk";
 
 function summarizeRawMessages(messages: unknown[]): string {
   return messages
@@ -32,6 +33,52 @@ function summarizeRawMessages(messages: unknown[]): string {
       return `${index}:${role}:${typeof content}`;
     })
     .join(", ");
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function preview(text: string, max = 140): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= max) return compact;
+  return `${compact.slice(0, max)}...`;
+}
+
+async function persistMessagesResiliently(
+  session: Awaited<ReturnType<PluginState["honcho"]["session"]>>,
+  messages: MessageInput[],
+  api: OpenClawPluginApi
+): Promise<{ saved: number; failed: number }> {
+  let saved = 0;
+  let failed = 0;
+
+  // Persist one-by-one so one bad message does not block the entire turn.
+  for (const [index, message] of messages.entries()) {
+    try {
+      await session.addMessages(message);
+      saved += 1;
+    } catch (error) {
+      failed += 1;
+      api.logger.error(
+        `[honcho] addMessages failed index=${index} peerId=${message.peerId} contentLength=${message.content.length} preview=${safeJson(preview(message.content))}`
+      );
+      if (error instanceof Error) {
+        api.logger.error(`[honcho] addMessages error: ${error.name}: ${error.message}`);
+        const anyError = error as unknown as Record<string, unknown>;
+        if (anyError.status !== undefined) api.logger.error(`[honcho] addMessages status: ${String(anyError.status)}`);
+        if (anyError.body !== undefined) api.logger.error(`[honcho] addMessages body: ${safeJson(anyError.body)}`);
+      } else {
+        api.logger.error(`[honcho] addMessages non-Error throw: ${safeJson(error)}`);
+      }
+    }
+  }
+
+  return { saved, failed };
 }
 
 export function getInitialLastSavedIndex(messages: unknown[]): number {
@@ -123,18 +170,28 @@ export function registerCaptureHook(api: OpenClawPluginApi, state: PluginState):
         return;
       }
 
-      await session.addMessages(messages);
-      api.logger.debug?.(
-        `[honcho] persisted messages count=${messages.length}; updating lastSavedIndex=${event.messages.length}`
-      );
+      const persisted = await persistMessagesResiliently(session, messages, api);
+      if (persisted.failed > 0) {
+        api.logger.warn?.(
+          `[honcho] persisted with partial failures saved=${persisted.saved} failed=${persisted.failed}; updating lastSavedIndex=${event.messages.length}`
+        );
+      } else {
+        api.logger.debug?.(
+          `[honcho] persisted messages count=${persisted.saved}; updating lastSavedIndex=${event.messages.length}`
+        );
+      }
       await session.setMetadata({ ...meta, ...sessionMeta, lastSavedIndex: event.messages.length });
     } catch (error) {
-      api.logger.error(`[honcho] Failed to save messages to Honcho: ${error}`);
+      if (error instanceof Error) {
+        api.logger.error(`[honcho] Failed to save messages to Honcho: ${error.name}: ${error.message}`);
+      } else {
+        api.logger.error(`[honcho] Failed to save messages to Honcho: ${safeJson(error)}`);
+      }
       if (error instanceof Error) {
         api.logger.error(`[honcho] Stack: ${error.stack}`);
         const anyError = error as unknown as Record<string, unknown>;
-        if (anyError.status) api.logger.error(`[honcho] Status: ${anyError.status}`);
-        if (anyError.body) api.logger.error(`[honcho] Body: ${JSON.stringify(anyError.body)}`);
+        if (anyError.status !== undefined) api.logger.error(`[honcho] Status: ${String(anyError.status)}`);
+        if (anyError.body !== undefined) api.logger.error(`[honcho] Body: ${safeJson(anyError.body)}`);
       }
     }
   });
