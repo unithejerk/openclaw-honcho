@@ -62,13 +62,16 @@ export function extractMessages(
     if (typeof m.content === "string") {
       content = m.content;
     } else if (Array.isArray(m.content)) {
-      content = m.content
-        .filter(
-          (block: unknown) =>
-            typeof block === "object" &&
-            block !== null &&
-            (block as Record<string, unknown>).type === "text"
-        )
+      const textBlocks = m.content.filter(
+        (block: unknown) =>
+          typeof block === "object" &&
+          block !== null &&
+          (block as Record<string, unknown>).type === "text"
+      );
+
+      // Non-text blocks (e.g. tool_result / tool_use) are intentionally
+      // excluded from persisted transcript messages.
+      content = textBlocks
         .map((block: unknown) => (block as Record<string, unknown>).text)
         .filter((t): t is string => typeof t === "string")
         .join("\n");
