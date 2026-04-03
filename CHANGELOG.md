@@ -2,6 +2,11 @@
 
 All notable changes to `@honcho-ai/openclaw-honcho` will be documented in this file.
 
+## Unreleased
+
+### Fixed
+- **Stale tool names in `workspace_md/AGENTS.md` (#49)**: Default agent template referenced deprecated tool names (`honcho_profile`, `honcho_search`, `honcho_recall`, `honcho_analyze`) that no longer exist since v1.2.0. Agents bootstrapped with the template would fail when calling memory tools. Updated all references to match registered tools and added parameter hints.
+
 ## [1.2.2] - 2026-03-31
 
 ### Fixed

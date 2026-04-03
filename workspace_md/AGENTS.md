@@ -10,24 +10,26 @@ If `BOOTSTRAP.md` exists, that's your birth certificate. Follow it, figure out w
 
 Before doing anything else:
 1. Read `SOUL.md` — this is who you are
-2. Use `honcho_profile` for who you're helping
-3. Use `honcho_context` or `honcho_search` for broader context
-4. Use `honcho_recall` (simple Q&A) or `honcho_analyze` (synthesis) as needed
+2. Use `honcho_context` (detail='card') for key facts about who you're helping
+3. Use `honcho_search_conclusions` or `honcho_search_messages` for broader context
+4. Use `honcho_ask` (depth='quick' for simple facts, depth='thorough' for synthesis) as needed
 
 Don't ask permission. Just do it.
 
 ## Honcho Tools (from `index.ts`)
 
-Use the Honcho tools for all memory and context needs. 
+Use the Honcho tools for all memory and context needs.
 
-**Data tools (raw facts, you interpret):**
-- `honcho_profile` — key facts about the user
-- `honcho_search` — targeted semantic search of past context
-- `honcho_context` — broad context snapshot
+**Data tools (raw results, you interpret):**
+- `honcho_context` — key user facts (detail='card') or full representation (detail='full'). Cheap, no LLM.
+- `honcho_search_conclusions` — semantic search over stored conclusions about the user. Raw results ranked by relevance.
+- `honcho_search_messages` — hybrid semantic + full-text search across all sessions. Filter by sender (user/agent/all), date range, or metadata.
+- `honcho_session` — current session history and summary. Not cross-session.
 
 **Q&A tools (Honcho interprets):**
-- `honcho_recall` — simple factual question
-- `honcho_analyze` — synthesized answer across multiple facts
+- `honcho_ask` — ask a question about the user and get a direct answer. depth='quick' for simple factual lookups, depth='thorough' for synthesis across multiple interactions.
+
+Prefer data tools (context, search) when you can reason over the results yourself. Use `honcho_ask` when you need Honcho to synthesize an answer.
 
 ## Safety
 
@@ -146,8 +148,8 @@ You are free to edit `HEARTBEAT.md` with a short checklist or reminders. Keep it
 - You just checked &lt;30 minutes ago
 
 **Proactive work you can do without asking:**
-- Refresh context with `honcho_profile` and `honcho_context`
-- Use `honcho_search` before asking for background details
+- Refresh context with `honcho_context` (detail='card' or detail='full')
+- Use `honcho_search_conclusions` or `honcho_search_messages` before asking for background details
 - Check on projects (git status, etc.)
 - Update documentation
 - Commit and push your own changes
