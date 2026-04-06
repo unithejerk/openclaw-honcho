@@ -104,7 +104,7 @@ async function flushMessages(
     }
   }
   if (senderIds.size > 0) {
-    api.logger.debug?.(`[honcho] Resolved ${senderIds.size} unique sender(s) from ${userMsgCount} user message(s): ${[...senderIds].join(", ")}`);
+    api.logger.debug?.(`[honcho] Resolved ${senderIds.size} unique sender(s) from ${userMsgCount} user message(s)`);
   }
 
   // Parallel peer resolution — avoids sequential await bottleneck in group chats.

@@ -59,6 +59,10 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
   // workspace metadata. Errors propagate to all waiters.
   let initPromise: Promise<void> | null = null;
 
+  // Serialize workspace metadata writes to prevent concurrent read-modify-write
+  // races between getHumanPeer() and getAgentPeer().
+  let metadataWriteLock: Promise<void> = Promise.resolve();
+
   const state: PluginState = {
     honcho,
     cfg,
@@ -146,10 +150,14 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
     let honchoId = state.humanPeerMap[channelPeerId];
     if (!honchoId) {
       honchoId = channelPeerId;
-      // Persist auto-created mapping
+      // Persist auto-created mapping (serialized to prevent concurrent write races)
       state.humanPeerMap[channelPeerId] = honchoId;
-      const wsMeta = await honcho.getMetadata();
-      await honcho.setMetadata({ ...wsMeta, humanPeerMap: state.humanPeerMap });
+      const prev = metadataWriteLock;
+      metadataWriteLock = prev.then(async () => {
+        const wsMeta = await honcho.getMetadata();
+        await honcho.setMetadata({ ...wsMeta, humanPeerMap: state.humanPeerMap });
+      }).catch(() => { /* errors logged elsewhere */ });
+      await metadataWriteLock;
       api.logger.info(`[honcho] Auto-created human peer mapping: "${channelPeerId}" → "${honchoId}"`);
     }
 
@@ -213,8 +221,12 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
 
     if (state.agentPeerMap[id] !== peerId) {
       state.agentPeerMap[id] = peerId;
-      const wsMeta = await honcho.getMetadata();
-      await honcho.setMetadata({ ...wsMeta, agentPeerMap: state.agentPeerMap });
+      const prev = metadataWriteLock;
+      metadataWriteLock = prev.then(async () => {
+        const wsMeta = await honcho.getMetadata();
+        await honcho.setMetadata({ ...wsMeta, agentPeerMap: state.agentPeerMap });
+      }).catch(() => { /* errors logged elsewhere */ });
+      await metadataWriteLock;
     }
 
     peer = await honcho.peer(peerId);

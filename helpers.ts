@@ -148,13 +148,19 @@ const CONVERSATION_INFO_SENTINEL = "Conversation info (untrusted metadata):";
  * Extract the sender_id from a raw message's "Conversation info (untrusted metadata):"
  * metadata block. Must be called BEFORE cleanMessageContent() which strips these blocks.
  * Returns undefined for DMs (no metadata block) or on parse failure.
+ *
+ * Only considers the FIRST occurrence of the sentinel to prevent user-pasted or quoted
+ * metadata blocks from poisoning sender attribution.
  */
 export function extractSenderId(content: string): string | undefined {
   if (!content || !content.includes(CONVERSATION_INFO_SENTINEL)) return undefined;
 
   const lines = content.split("\n");
+  let found = false;
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].trim() !== CONVERSATION_INFO_SENTINEL) continue;
+    if (found) return undefined; // Ignore duplicate sentinels (likely user-pasted content)
+    found = true;
     if (lines[i + 1]?.trim() !== "```json") continue;
 
     // Collect JSON lines between ```json and ```
