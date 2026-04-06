@@ -1,4 +1,3 @@
-import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -9,31 +8,6 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import type { PluginState } from "../state.js";
 import { OWNER_ID } from "../state.js";
 
-/* ── Upload manifest ─────────────────────────────────────────────────── */
-
-type ManifestEntry = { sha256: string; uploadedAt: string; baseUrl: string; workspaceId: string };
-type UploadManifest = Record<string, ManifestEntry>;
-
-const MANIFEST_PATH = () => path.join(os.homedir(), ".openclaw", ".upload-manifest.json");
-
-function loadManifest(): UploadManifest {
-  try {
-    return JSON.parse(fs.readFileSync(MANIFEST_PATH(), "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-function saveManifest(manifest: UploadManifest): void {
-  const dir = path.dirname(MANIFEST_PATH());
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(MANIFEST_PATH(), JSON.stringify(manifest, null, 2));
-}
-
-function contentHash(content: Buffer): string {
-  return crypto.createHash("sha256").update(content).digest("hex");
-}
-
 export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
   api.registerCli(
     ({ program, workspaceDir }) => {
@@ -42,83 +16,52 @@ export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
       cmd
         .command("setup")
         .description("Configure Honcho API key and upload memory files to Honcho")
-        .option("--reconfigure", "Force re-entry of all configuration values")
-        .action(async (options: { reconfigure?: boolean }) => {
+        .action(async () => {
           const configDir = path.join(os.homedir(), ".openclaw");
           const configPath = path.join(configDir, "openclaw.json");
 
-          // Load existing config to use as defaults
-          let config: Record<string, unknown> = {};
-          if (fs.existsSync(configPath)) {
-            try { config = JSON.parse(fs.readFileSync(configPath, "utf-8")); } catch { /* use empty */ }
-          }
-          const existingPluginCfg = (
-            ((config.plugins as Record<string, unknown>)
-              ?.entries as Record<string, unknown>)
-              ?.["openclaw-honcho"] as Record<string, unknown>
-          )?.config as Record<string, unknown> | undefined;
-
-          const savedApiKey = (existingPluginCfg?.apiKey as string) ?? "";
-          const savedBaseUrl = (existingPluginCfg?.baseUrl as string) || "https://api.honcho.dev";
-          const savedWorkspaceId = (existingPluginCfg?.workspaceId as string) || "openclaw";
-          const hasExistingConfig = !!existingPluginCfg && !!savedApiKey;
-
           console.log("\nHoncho Setup\n");
           console.log("Get your API key from: https://app.honcho.dev\n");
+          console.log('Press Enter to use the default shown in [brackets].\n');
 
           const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
           const ask = (q: string): Promise<string> => new Promise((resolve) => rl.question(q, resolve));
 
           try {
-            let resolvedApiKey: string;
-            let resolvedBaseUrl: string;
-            let resolvedWorkspaceId: string;
+            const apiKeyInput = await ask("Honcho API key (press Enter for self-hosted mode): ");
+            const baseUrlInput = await ask("Base URL [https://api.honcho.dev]: ");
+            const workspaceIdInput = await ask("Workspace ID [openclaw]: ");
 
-            if (hasExistingConfig && !options.reconfigure) {
-              const maskedKey = savedApiKey.length > 8
-                ? savedApiKey.slice(0, 4) + "..." + savedApiKey.slice(-4)
-                : "****";
-              console.log("Existing configuration found:");
-              console.log(`  API key:      ${maskedKey}`);
-              console.log(`  Base URL:     ${savedBaseUrl}`);
-              console.log(`  Workspace ID: ${savedWorkspaceId}`);
-              console.log('\nPress Enter to keep existing values, or use --reconfigure to change.\n');
+            const resolvedBaseUrl = baseUrlInput.trim() || "https://api.honcho.dev";
+            const resolvedWorkspaceId = workspaceIdInput.trim() || "openclaw";
 
-              resolvedApiKey = savedApiKey;
-              resolvedBaseUrl = savedBaseUrl;
-              resolvedWorkspaceId = savedWorkspaceId;
-              console.log("✓ Using existing configuration\n");
-            } else {
-              console.log('Press Enter to use the default shown in [brackets].\n');
-
-              const apiKeyDefault = savedApiKey ? ` [${savedApiKey.slice(0, 4)}...${savedApiKey.slice(-4)}]` : "";
-              const apiKeyInput = await ask(`Honcho API key${apiKeyDefault || " (press Enter for self-hosted mode)"}: `);
-              const baseUrlInput = await ask(`Base URL [${savedBaseUrl}]: `);
-              const workspaceIdInput = await ask(`Workspace ID [${savedWorkspaceId}]: `);
-
-              resolvedApiKey = apiKeyInput.trim() || savedApiKey;
-              resolvedBaseUrl = baseUrlInput.trim() || savedBaseUrl;
-              resolvedWorkspaceId = workspaceIdInput.trim() || savedWorkspaceId;
-
-              // Write config
-              if (!config.plugins) config.plugins = {};
-              const pluginsSection = config.plugins as Record<string, unknown>;
-              if (!pluginsSection.entries) pluginsSection.entries = {};
-              const entriesSection = pluginsSection.entries as Record<string, unknown>;
-              const existingEntry = (entriesSection["openclaw-honcho"] as Record<string, unknown>) ?? {};
-              const pluginCfg: Record<string, unknown> = {
-                ...(existingEntry.config as Record<string, unknown> ?? {}),
-              };
-              if (resolvedApiKey) pluginCfg.apiKey = resolvedApiKey;
-              else delete pluginCfg.apiKey;
-              pluginCfg.baseUrl = resolvedBaseUrl;
-              pluginCfg.workspaceId = resolvedWorkspaceId;
-              entriesSection["openclaw-honcho"] = { ...existingEntry, config: pluginCfg };
-
-              if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
-              fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-              console.log("\n✓ Configuration saved to ~/.openclaw/openclaw.json");
+            // Write config
+            let config: Record<string, unknown> = {};
+            if (fs.existsSync(configPath)) {
+              try { config = JSON.parse(fs.readFileSync(configPath, "utf-8")); } catch { /* use empty */ }
             }
+            if (!config.plugins) config.plugins = {};
+            const pluginsSection = config.plugins as Record<string, unknown>;
+            if (!pluginsSection.entries) pluginsSection.entries = {};
+            const entriesSection = pluginsSection.entries as Record<string, unknown>;
+            const existingEntry = (entriesSection["openclaw-honcho"] as Record<string, unknown>) ?? {};
+            const pluginCfg: Record<string, unknown> = {
+              ...(existingEntry.config as Record<string, unknown> ?? {}),
+            };
+            const trimmedApiKey = apiKeyInput.trim();
+            if (trimmedApiKey) pluginCfg.apiKey = trimmedApiKey;
+            else delete pluginCfg.apiKey;
+            const trimmedBaseUrl = baseUrlInput.trim();
+            if (trimmedBaseUrl) pluginCfg.baseUrl = trimmedBaseUrl;
+            else delete pluginCfg.baseUrl;
+            const trimmedWorkspaceId = workspaceIdInput.trim();
+            if (trimmedWorkspaceId) pluginCfg.workspaceId = trimmedWorkspaceId;
+            else delete pluginCfg.workspaceId;
+            entriesSection["openclaw-honcho"] = { ...existingEntry, config: pluginCfg };
+
+            if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            console.log("\n✓ Configuration saved to ~/.openclaw/openclaw.json");
 
             // Resolve default agent and its workspace from config
             let savedConfig: Record<string, unknown> = {};
@@ -246,7 +189,7 @@ export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
 
             // Upload files to Honcho
             const setupHoncho = new Honcho({
-              apiKey: resolvedApiKey || undefined,
+              apiKey: apiKeyInput.trim() || undefined,
               baseURL: resolvedBaseUrl,
               workspaceId: resolvedWorkspaceId,
             });
@@ -261,86 +204,31 @@ export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
               [agentPeerSetup, { observeMe: true, observeOthers: true }],
             ]);
 
-            // Cooldown after setup calls — the hosted platform (groudon) enforces
-            // 5 req/sec per tenant; the 6 calls above consume most of that budget.
-            await new Promise((r) => setTimeout(r, 1500));
-
             const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5MB safety cap
-            const UPLOAD_DELAY_MS = 400; // stay under 5 req/sec platform limit
 
-            const manifest = loadManifest();
             let uploadCount = 0;
-            let unchangedCount = 0;
-            const skipped: string[] = [];
-            const failed: { filePath: string; error: string }[] = [];
-            const total = detected.length;
-
-            for (let i = 0; i < detected.length; i++) {
-              const { filePath, peer } = detected[i];
-              const progress = `[${i + 1}/${total}]`;
-
+            for (const { filePath, peer } of detected) {
               const stat = await fs.promises.stat(filePath).catch(() => null);
               if (!stat?.isFile()) continue;
               if (stat.size > MAX_UPLOAD_BYTES) {
-                console.log(`  ${progress} ! Skipping (larger than 5MB): ${filePath}`);
-                skipped.push(filePath);
+                console.log(`  ! Skipping (too large): ${filePath}`);
                 continue;
               }
               const filename = path.basename(filePath);
               const ext = path.extname(filename).toLowerCase();
               const content_type = ext === ".json" ? "application/json" : ext === ".md" ? "text/markdown" : null;
               if (!content_type) {
-                console.log(`  ${progress} ! Skipping unsupported type: ${filePath}`);
-                skipped.push(filePath);
+                console.log(`  ! Skipping unsupported file type: ${filePath}`);
                 continue;
               }
-
+              const content = await fs.promises.readFile(filePath);
               const targetPeer = peer === "owner" ? ownerPeerSetup : agentPeerSetup;
-              try {
-                const content = await fs.promises.readFile(filePath);
-                const hash = contentHash(content);
-
-                // Skip files already uploaded with identical content to the same destination
-                const prev = manifest[filePath];
-                if (prev && prev.sha256 === hash && prev.baseUrl === resolvedBaseUrl && prev.workspaceId === resolvedWorkspaceId) {
-                  console.log(`  ${progress} ~ Unchanged: ${filePath}`);
-                  unchangedCount++;
-                  continue;
-                }
-
-                await new Promise((r) => setTimeout(r, UPLOAD_DELAY_MS));
-                await migrationSession.uploadFile({ filename, content, content_type }, targetPeer, {});
-                console.log(`  ${progress} ✓ Uploaded: ${filePath}`);
-                uploadCount++;
-
-                // Record success
-                manifest[filePath] = { sha256: hash, uploadedAt: new Date().toISOString(), baseUrl: resolvedBaseUrl, workspaceId: resolvedWorkspaceId };
-                saveManifest(manifest);
-              } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                console.log(`  ${progress} ✗ Failed: ${filePath}`);
-                failed.push({ filePath, error: msg });
-              }
+              await new Promise((r) => setTimeout(r, 250)); // stay under 5 req/sec limit
+              await migrationSession.uploadFile({ filename, content, content_type }, targetPeer, {});
+              console.log(`  ✓ Uploaded: ${filePath}`);
+              uploadCount++;
             }
-
-            // Clean stale manifest entries
-            for (const key of Object.keys(manifest)) {
-              if (!fs.existsSync(key)) delete manifest[key];
-            }
-            saveManifest(manifest);
-
-            // Summary
-            console.log(`\nUpload summary:`);
-            console.log(`  Uploaded:  ${uploadCount}/${total}`);
-            if (unchangedCount > 0) console.log(`  Unchanged: ${unchangedCount}`);
-            if (skipped.length > 0) console.log(`  Skipped:   ${skipped.length}`);
-            if (failed.length > 0) {
-              console.log(`  Failed:    ${failed.length}`);
-              for (const f of failed) {
-                console.log(`    ! ${f.filePath} — ${f.error}`);
-              }
-              console.log(`\nRun \`openclaw honcho setup\` again to retry failed files.`);
-            }
+            console.log(`\n✓ Uploaded ${uploadCount} file(s) to Honcho`);
 
             console.log("\n✓ Setup complete. Run `openclaw gateway --force` to activate.\n");
           } finally {
@@ -369,11 +257,13 @@ export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
         .command("ask <question>")
         .description("Ask Honcho about the user")
         .option("-a, --agent <id>", "Agent ID to query as (default: primary agent)")
-        .action(async (question: string, options: { agent?: string }) => {
+        .option("-p, --peer <id>", "Channel peer ID or Honcho peer ID to target (default: owner)")
+        .action(async (question: string, options: { agent?: string; peer?: string }) => {
           try {
             await state.ensureInitialized();
             const agentPeer = await state.getAgentPeer(options.agent ?? state.resolveDefaultAgentId());
-            const answer = await agentPeer.chat(question, { target: state.ownerPeer! });
+            const humanPeer = await state.getHumanPeer(options.peer);
+            const answer = await agentPeer.chat(question, { target: humanPeer });
             console.log(answer ?? "No information available.");
           } catch (error) {
             console.error(`Failed to query: ${error}`);
@@ -385,10 +275,12 @@ export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
         .description("Semantic search over Honcho memory")
         .option("-k, --top-k <number>", "Number of results to return", "10")
         .option("-d, --max-distance <number>", "Maximum semantic distance (0-1)", "0.5")
-        .action(async (query: string, options: { topK: string; maxDistance: string }) => {
+        .option("-p, --peer <id>", "Channel peer ID or Honcho peer ID to target (default: owner)")
+        .action(async (query: string, options: { topK: string; maxDistance: string; peer?: string }) => {
           try {
             await state.ensureInitialized();
-            const representation = await state.ownerPeer!.representation({
+            const humanPeer = await state.getHumanPeer(options.peer);
+            const representation = await humanPeer.representation({
               searchQuery: query,
               searchTopK: parseInt(options.topK, 10),
               searchMaxDistance: parseFloat(options.maxDistance),
