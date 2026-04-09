@@ -1,0 +1,78 @@
+name: Publish to npm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      # Validate version and ensure it advances npm latest
+      - name: Validate package version against npm
+        id: version-check
+        run: |
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          echo "local=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
+
+          LATEST_VERSION=$(npm view "@honcho-ai/openclaw-honcho" version 2>/dev/null || echo "")
+          echo "latest=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+
+          npx semver@7.7.4 "$LOCAL_VERSION" >/dev/null || {
+            echo "::error::package.json version \"$LOCAL_VERSION\" is not valid semver"
+            exit 1
+          }
+
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "No published version found on npm — will publish $LOCAL_VERSION"
+            exit 0
+          fi
+
+          if npx semver "$LOCAL_VERSION" -r ">$LATEST_VERSION" >/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version $LOCAL_VERSION is greater than npm latest $LATEST_VERSION — will publish"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Version $LOCAL_VERSION must be greater than npm latest $LATEST_VERSION"
+            exit 1
+          fi
+
+      - name: Publish to npm
+        if: steps.version-check.outputs.changed == 'true'
+        run: pnpm publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Tag release
+        run: |
+          VERSION=${{ steps.version-check.outputs.local }}
+          TAG="v${VERSION}"
+          if git ls-remote --exit-code --tags origin "${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists — skipping"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "${TAG}"
+          git push origin "${TAG}"

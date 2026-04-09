@@ -18,6 +18,7 @@ export type HonchoConfig = {
   ownerObserveOthers: boolean;
   peerMappings: Record<string, string>;
   agentPeerMappings: Record<string, string>;
+  crossSessionSearch: boolean;
 };
 
 /**
@@ -83,6 +84,7 @@ export const honchoConfigSchema = {
       ownerObserveOthers: typeof cfg.ownerObserveOthers === "boolean" ? cfg.ownerObserveOthers : false,
       peerMappings: parseStringRecord(cfg.peerMappings),
       agentPeerMappings: parseStringRecord(cfg.agentPeerMappings),
+      crossSessionSearch: typeof cfg.crossSessionSearch === "boolean" ? cfg.crossSessionSearch : true,
     };
   },
 };

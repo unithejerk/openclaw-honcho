@@ -68,6 +68,7 @@ Run `openclaw honcho setup` to configure interactively, or set values directly i
 | `baseUrl`              | `string`   | `"https://api.honcho.dev"` | API endpoint (for self-hosted instances). |
 | `noisePatterns`        | `string[]` | built-in defaults          | Patterns to skip messages. User-provided patterns are merged with built-in defaults (unless `disableDefaultNoisePatterns` is set). |
 | `disableDefaultNoisePatterns` | `boolean` | `false`           | When `true`, built-in noise patterns are not applied — only `noisePatterns` entries are used. |
+| `crossSessionSearch`   | `boolean`  | `true`                     | Allow `memory_search` and `memory_get` to access any session. Set to `false` to restrict to the active session and its children. |
 | `ownerObserveOthers`   | `boolean`  | `false`                    | Whether the owner peer observes agent messages in Honcho's social model. |
 | `peerMappings`         | `object`   | `{}`                       | Maps channel peer IDs (e.g., Slack user IDs) to Honcho peer IDs. Unmapped senders are auto-created. |
 | `agentPeerMappings`    | `object`   | `{}`                       | Maps OpenClaw agent IDs to Honcho peer IDs. Default: agent `foo` gets peer ID `agent-foo`. |
@@ -283,6 +284,37 @@ You can also pre-warm QMD to avoid first-run delays:
 ```bash
 qmd query "test"
 ```
+
+## Known Issues
+
+### OpenClaw 2026.4.5: Hooks silently stop firing
+
+OpenClaw 2026.4.5 has a plugin loader bug where reentrant provider snapshot loads during initialization can cause hooks to register into a registry that is later discarded. The result is that `agent_end` (and potentially other hooks) never fire — the plugin appears loaded and no errors are logged, but no sessions are written to Honcho.
+
+**Affected versions:** OpenClaw 2026.4.5 only.
+
+**Symptoms:**
+- Plugin logs `Honcho memory plugin loaded` at startup
+- No errors in gateway logs
+- `honcho_search_messages` returns nothing after the upgrade date
+- Honcho queue shows 0 pending (deriver has nothing to process)
+- Manual Honcho API calls still work
+
+**Fix:** Update OpenClaw to **2026.4.6 or later**. The upstream fixes landed in the 4.6 changelog:
+
+> Plugins/provider hooks: stop recursive provider snapshot loads from overflowing the stack during plugin initialization. (#61922, #61938, #61946, #61951)
+
+```bash
+# Update OpenClaw
+npm install -g openclaw@latest
+# or
+brew upgrade openclaw
+
+# Restart the gateway
+openclaw gateway restart
+```
+
+**Verified working:** OpenClaw 2026.3.22 through 2026.4.4, and 2026.4.6+.
 
 ## Development
 
