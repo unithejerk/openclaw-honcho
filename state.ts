@@ -12,6 +12,20 @@ import { honchoConfigSchema, type HonchoConfig } from "./config.js";
 export const OWNER_ID = "owner";
 export const LEGACY_PEER_ID = "openclaw";
 
+export function isLocalHonchoBaseUrl(baseUrl?: string): boolean {
+  const base = String(baseUrl ?? "").trim();
+  if (!base) return false;
+
+  try {
+    const { hostname, protocol } = new URL(base);
+    if (protocol !== "http:" && protocol !== "https:") return false;
+    const normalizedHost = hostname.replace(/^\[(.*)\]$/, "$1");
+    return normalizedHost === "localhost" || normalizedHost === "127.0.0.1" || normalizedHost === "::1";
+  } catch {
+    return false;
+  }
+}
+
 export type PluginState = {
   honcho: Honcho;
   cfg: HonchoConfig;
@@ -32,7 +46,9 @@ export type PluginState = {
 export function createPluginState(api: OpenClawPluginApi): PluginState {
   const cfg = honchoConfigSchema.parse(api.pluginConfig);
 
-  if (!cfg.apiKey) {
+  const selfHosted = isLocalHonchoBaseUrl(cfg.baseUrl);
+
+  if (!cfg.apiKey && !selfHosted) {
     api.logger.warn(
       "openclaw-honcho: No API key configured. Set HONCHO_API_KEY or configure apiKey in plugin config."
     );
