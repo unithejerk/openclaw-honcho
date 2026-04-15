@@ -34,11 +34,11 @@ export function registerAskTool(api: OpenClawPluginApi, state: PluginState): voi
 
         await state.ensureInitialized();
         const agentPeer = await state.getAgentPeer(toolCtx.agentId);
-        const humanPeer = await state.resolveSessionHumanPeer(buildSessionKey(toolCtx));
+        const participantPeer = await state.resolveSessionParticipantPeer(buildSessionKey(toolCtx));
 
         const reasoningLevel = depth === "thorough" ? "high" : "low";
         const answer = await agentPeer.chat(query, {
-          target: humanPeer,
+          target: participantPeer,
           reasoningLevel,
         });
 

@@ -210,7 +210,7 @@ export function shouldSkipMessage(content: string, noisePatterns: string[]): boo
 
 export function extractMessages(
   rawMessages: unknown[],
-  defaultHumanPeer: Peer,
+  defaultParticipantPeer: Peer,
   agentPeer: Peer,
   noisePatterns: string[] = [],
   resolvePeer?: (senderId: string) => Peer | undefined,
@@ -245,7 +245,7 @@ export function extractMessages(
     let peer: Peer;
     if (role === "user") {
       const senderId = extractSenderId(rawContent);
-      peer = (senderId && resolvePeer?.(senderId)) || defaultHumanPeer;
+      peer = (senderId && resolvePeer?.(senderId)) || defaultParticipantPeer;
     } else {
       peer = agentPeer;
     }

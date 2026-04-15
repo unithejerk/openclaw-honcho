@@ -41,9 +41,9 @@ export function registerSearchTool(api: OpenClawPluginApi, state: PluginState): 
         };
 
         await state.ensureInitialized();
-        const humanPeer = await state.resolveSessionHumanPeer(buildSessionKey(toolCtx));
+        const participantPeer = await state.resolveSessionParticipantPeer(buildSessionKey(toolCtx));
 
-        const representation = await humanPeer.representation({
+        const representation = await participantPeer.representation({
           searchQuery: query,
           searchTopK: topK ?? 10,
           searchMaxDistance: maxDistance ?? 0.5,

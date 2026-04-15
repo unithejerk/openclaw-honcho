@@ -27,10 +27,10 @@ export function registerContextTool(api: OpenClawPluginApi, state: PluginState):
         const { detail = "card" } = params as { detail?: "card" | "full" };
 
         await state.ensureInitialized();
-        const humanPeer = await state.resolveSessionHumanPeer(buildSessionKey(toolCtx));
+        const participantPeer = await state.resolveSessionParticipantPeer(buildSessionKey(toolCtx));
 
         if (detail === "card") {
-          const card = await humanPeer.card().catch((err) => {
+          const card = await participantPeer.card().catch((err) => {
             // Only treat NotFoundError as empty; re-throw others or log
             if (err?.name === "NotFoundError") return null;
             // Optionally log unexpected errors for debugging
@@ -62,7 +62,7 @@ export function registerContextTool(api: OpenClawPluginApi, state: PluginState):
         }
 
         // detail === "full"
-        const representation = await humanPeer.representation({
+        const representation = await participantPeer.representation({
           includeMostFrequent: true,
         });
 

@@ -16,13 +16,13 @@ export function registerContextHook(api: OpenClawPluginApi, state: PluginState):
     try {
       await state.ensureInitialized();
       const agentPeer = await state.getAgentPeer(agentId);
-      const humanPeer = await state.resolveSessionHumanPeer(sessionKey);
+      const participantPeer = await state.resolveSessionParticipantPeer(sessionKey);
 
       const sections: string[] = [];
 
       if (isSubagent) {
         try {
-          const peerCtx = await agentPeer.context({ target: humanPeer });
+          const peerCtx = await agentPeer.context({ target: participantPeer });
           if (peerCtx.peerCard?.length) {
             sections.push(`Key facts:\n${peerCtx.peerCard.map((f: string) => `• ${f}`).join("\n")}`);
           }
@@ -44,7 +44,7 @@ export function registerContextHook(api: OpenClawPluginApi, state: PluginState):
           context = await session.context({
             summary: true,
             tokens: 2000,
-            peerTarget: humanPeer,
+            peerTarget: participantPeer,
             peerPerspective: agentPeer,
           });
         } catch (e: unknown) {

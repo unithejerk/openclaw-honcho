@@ -84,7 +84,7 @@ async function flushMessages(
 
   const newRawMessages = messages.slice(startIndex);
 
-  // Pre-resolve human peers for all unique sender IDs in this batch
+  // Pre-resolve participant peers for all unique sender IDs in this batch
   const senderIds = new Set<string>();
   let lastSenderId: string | undefined;
   let userMsgCount = 0;
@@ -108,16 +108,16 @@ async function flushMessages(
   }
 
   // Parallel peer resolution — avoids sequential await bottleneck in group chats.
-  const resolvedPeers = new Map<string, Awaited<ReturnType<typeof state.getHumanPeer>>>();
+  const resolvedPeers = new Map<string, Awaited<ReturnType<typeof state.getParticipantPeer>>>();
   const senderIdArray = [...senderIds];
-  const peers = await Promise.all(senderIdArray.map((id) => state.getHumanPeer(id)));
+  const peers = await Promise.all(senderIdArray.map((id) => state.getParticipantPeer(id)));
   for (let i = 0; i < senderIdArray.length; i++) {
     resolvedPeers.set(senderIdArray[i], peers[i]);
   }
 
-  const defaultHumanPeer = await state.getHumanPeer();
+  const defaultParticipantPeer = await state.getParticipantPeer();
 
-  // Build peer configs: default owner + all resolved human peers + agent + parent
+  // Build peer configs: default owner + all resolved participant peers + agent + parent
   const peerConfigMap = new Map<string, { observeMe: boolean; observeOthers: boolean }>();
   peerConfigMap.set(OWNER_ID, { observeMe: true, observeOthers: state.cfg.ownerObserveOthers });
   for (const [, peer] of resolvedPeers) {
@@ -137,18 +137,18 @@ async function flushMessages(
 
   const extracted = extractMessages(
     newRawMessages,
-    defaultHumanPeer,
+    defaultParticipantPeer,
     agentPeer,
     state.cfg.noisePatterns,
     (senderId) => resolvedPeers.get(senderId),
   );
 
   // Store sender IDs in session metadata for tool resolution.
-  // humanSenderId = last active sender (default for tools).
-  // humanSenderIds = all known senders in this session (for future multi-target tools).
+  // participantSenderId = last active sender (default for tools).
+  // participantSenderIds = all known senders in this session (for future multi-target tools).
   // Named "sender" (not "peer") to distinguish raw channel IDs from resolved Honcho peer IDs.
-  const previousSenderIds: string[] = Array.isArray(existingMeta.humanSenderIds)
-    ? (existingMeta.humanSenderIds as string[])
+  const previousSenderIds: string[] = Array.isArray(existingMeta.participantSenderIds)
+    ? (existingMeta.participantSenderIds as string[])
     : [];
   const allSenderIds = [...new Set([...previousSenderIds, ...senderIds])];
 
@@ -158,10 +158,10 @@ async function flushMessages(
     lastSavedIndex: messages.length,
   };
   if (lastSenderId) {
-    updatedMeta.humanSenderId = lastSenderId;
+    updatedMeta.participantSenderId = lastSenderId;
   }
   if (allSenderIds.length > 0) {
-    updatedMeta.humanSenderIds = allSenderIds;
+    updatedMeta.participantSenderIds = allSenderIds;
   }
 
   if (extracted.length === 0) {

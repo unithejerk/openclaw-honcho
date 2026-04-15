@@ -29,10 +29,12 @@ export function isLocalHonchoBaseUrl(baseUrl?: string): boolean {
 export type PluginState = {
   honcho: Honcho;
   cfg: HonchoConfig;
-  /** Cache of resolved human peers, keyed by channel peer ID (or OWNER_ID for default). */
-  humanPeers: Map<string, Peer>;
+  /** Cache of resolved participant peers, keyed by channel peer ID (or OWNER_ID for default).
+   * "Participant" intentionally generalizes over humans AND non-agent bots/agents in group
+   * chats — anyone in the conversation who isn't the local OpenClaw agent peer. */
+  participantPeers: Map<string, Peer>;
   /** Persistent mapping of channel peer ID → honcho peer ID, stored in workspace metadata. */
-  humanPeerMap: Record<string, string>;
+  participantPeerMap: Record<string, string>;
   agentPeers: Map<string, Peer>;
   agentPeerMap: Record<string, string>;
   /** Message count recorded at before_prompt_build time, keyed by Honcho session key.
@@ -43,13 +45,13 @@ export type PluginState = {
   api: OpenClawPluginApi;
   ensureInitialized: () => Promise<void>;
   getAgentPeer: (agentId?: string) => Promise<Peer>;
-  /** Resolve a human peer by channel peer ID. Returns default "owner" peer if no ID given. */
-  getHumanPeer: (channelPeerId?: string) => Promise<Peer>;
-  /** Resolve the human peer for a session by reading humanSenderId from session metadata.
+  /** Resolve a participant peer by channel peer ID. Returns default "owner" peer if no ID given. */
+  getParticipantPeer: (channelPeerId?: string) => Promise<Peer>;
+  /** Resolve the participant peer for a session by reading participantSenderId from session metadata.
    * Falls back to default "owner" peer if no metadata found. */
-  resolveSessionHumanPeer: (sessionKey: string) => Promise<Peer>;
-  /** Returns true if the given honcho peer ID belongs to a known human peer. */
-  isHumanPeerId: (peerId: string) => boolean;
+  resolveSessionParticipantPeer: (sessionKey: string) => Promise<Peer>;
+  /** Returns true if the given honcho peer ID belongs to a known participant peer. */
+  isParticipantPeerId: (peerId: string) => boolean;
   resolveDefaultAgentId: () => string;
 };
 
@@ -77,14 +79,14 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
   let initPromise: Promise<void> | null = null;
 
   // Serialize workspace metadata writes to prevent concurrent read-modify-write
-  // races between getHumanPeer() and getAgentPeer().
+  // races between getParticipantPeer() and getAgentPeer().
   let metadataWriteLock: Promise<void> = Promise.resolve();
 
   const state: PluginState = {
     honcho,
     cfg,
-    humanPeers: new Map<string, Peer>(),
-    humanPeerMap: {},
+    participantPeers: new Map<string, Peer>(),
+    participantPeerMap: {},
     agentPeers: new Map<string, Peer>(),
     agentPeerMap: {},
     turnStartIndex: new Map<string, number>(),
@@ -92,9 +94,9 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
     api,
     ensureInitialized,
     getAgentPeer,
-    getHumanPeer,
-    resolveSessionHumanPeer,
-    isHumanPeerId,
+    getParticipantPeer,
+    resolveSessionParticipantPeer,
+    isParticipantPeerId,
     resolveDefaultAgentId,
   };
 
@@ -122,11 +124,11 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
 
     const wsMeta = await honcho.getMetadata();
     state.agentPeerMap = (wsMeta.agentPeerMap as Record<string, string>) ?? {};
-    state.humanPeerMap = (wsMeta.humanPeerMap as Record<string, string>) ?? {};
+    state.participantPeerMap = (wsMeta.participantPeerMap as Record<string, string>) ?? {};
 
     // Config mappings take precedence over workspace metadata
     for (const [channelId, honchoId] of Object.entries(cfg.peerMappings)) {
-      state.humanPeerMap[channelId] = honchoId;
+      state.participantPeerMap[channelId] = honchoId;
     }
     for (const [agentId, honchoId] of Object.entries(cfg.agentPeerMappings)) {
       state.agentPeerMap[agentId] = honchoId;
@@ -135,80 +137,88 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
     const defaultId = resolveDefaultAgentId();
     if (Object.keys(state.agentPeerMap).length === 0) {
       state.agentPeerMap[defaultId] = `agent-${defaultId}`;
-      await honcho.setMetadata({ ...wsMeta, agentPeerMap: state.agentPeerMap, humanPeerMap: state.humanPeerMap });
+      await honcho.setMetadata({ ...wsMeta, agentPeerMap: state.agentPeerMap, participantPeerMap: state.participantPeerMap });
     } else if (Object.values(state.agentPeerMap).includes(LEGACY_PEER_ID) && !state.agentPeerMap[defaultId]) {
       state.agentPeerMap[defaultId] = LEGACY_PEER_ID;
-      await honcho.setMetadata({ ...wsMeta, agentPeerMap: state.agentPeerMap, humanPeerMap: state.humanPeerMap });
+      await honcho.setMetadata({ ...wsMeta, agentPeerMap: state.agentPeerMap, participantPeerMap: state.participantPeerMap });
     }
 
     // Create default "owner" peer
     const defaultPeer = await honcho.peer(OWNER_ID, { metadata: {} });
-    state.humanPeers.set(OWNER_ID, defaultPeer);
+    state.participantPeers.set(OWNER_ID, defaultPeer);
 
     state.initialized = true;
   }
 
-  async function getHumanPeer(channelPeerId?: string): Promise<Peer> {
+  async function getParticipantPeer(channelPeerId?: string): Promise<Peer> {
     if (!channelPeerId) {
       // Return default owner peer
-      let peer = state.humanPeers.get(OWNER_ID);
+      let peer = state.participantPeers.get(OWNER_ID);
       if (!peer) {
         peer = await honcho.peer(OWNER_ID, { metadata: {} });
-        state.humanPeers.set(OWNER_ID, peer);
+        state.participantPeers.set(OWNER_ID, peer);
       }
       return peer;
     }
 
     // Check cache
-    let peer = state.humanPeers.get(channelPeerId);
+    let peer = state.participantPeers.get(channelPeerId);
     if (peer) return peer;
 
     // Resolve honcho peer ID from mapping or use channel peer ID directly
-    let honchoId = state.humanPeerMap[channelPeerId];
+    let honchoId = state.participantPeerMap[channelPeerId];
     if (!honchoId) {
       honchoId = channelPeerId;
       // Persist auto-created mapping (serialized to prevent concurrent write races)
-      state.humanPeerMap[channelPeerId] = honchoId;
+      state.participantPeerMap[channelPeerId] = honchoId;
+      // Chain off `prev.catch(...)` so a failed prior write doesn't poison the
+      // next one, but re-expose this write's own errors via the awaited lock.
       const prev = metadataWriteLock;
-      metadataWriteLock = prev.then(async () => {
+      const current = prev.catch(() => undefined).then(async () => {
         const wsMeta = await honcho.getMetadata();
-        await honcho.setMetadata({ ...wsMeta, humanPeerMap: state.humanPeerMap });
-      }).catch(() => { /* errors logged elsewhere */ });
-      await metadataWriteLock;
-      api.logger.info(`[honcho] Auto-created human peer mapping: "${channelPeerId}" → "${honchoId}"`);
+        await honcho.setMetadata({ ...wsMeta, participantPeerMap: state.participantPeerMap });
+      });
+      metadataWriteLock = current;
+      try {
+        await current;
+      } catch (err) {
+        api.logger.error(
+          `[honcho] Failed to persist participantPeerMap for "${channelPeerId}": ${err instanceof Error ? err.message : String(err)}`
+        );
+        throw err;
+      }
+      api.logger.info(`[honcho] Auto-created participant peer mapping: "${channelPeerId}" → "${honchoId}"`);
     }
 
     peer = await honcho.peer(honchoId, { metadata: { channelPeerId } });
-    state.humanPeers.set(channelPeerId, peer);
+    state.participantPeers.set(channelPeerId, peer);
     return peer;
   }
 
-  async function resolveSessionHumanPeer(sessionKey: string): Promise<Peer> {
+  async function resolveSessionParticipantPeer(sessionKey: string): Promise<Peer> {
     try {
       const session = await honcho.session(sessionKey);
       const meta = await session.getMetadata();
       if (meta && typeof meta === "object") {
-        // Check humanSenderId (preferred) with fallback to legacy humanPeerId.
-        const senderId = (meta as Record<string, unknown>).humanSenderId
-          ?? (meta as Record<string, unknown>).humanPeerId;
+        const senderId = (meta as Record<string, unknown>).participantSenderId;
         if (typeof senderId === "string" && senderId.length > 0) {
-          return await getHumanPeer(senderId);
+          return await getParticipantPeer(senderId);
         }
       }
     } catch {
       // Fall through to default
     }
-    return await getHumanPeer();
+    return await getParticipantPeer();
   }
 
-  function isHumanPeerId(peerId: string): boolean {
+  function isParticipantPeerId(peerId: string): boolean {
     if (peerId === OWNER_ID) return true;
-    // Check if this peer ID is a known human peer (either as a channel ID key or honcho ID value)
-    for (const [, peer] of state.humanPeers) {
+    // Check if this peer ID is a known participant peer (either as a channel ID key or honcho ID value)
+    for (const [, peer] of state.participantPeers) {
       if (peer.id === peerId) return true;
     }
     // Also check the mapping values
-    return Object.values(state.humanPeerMap).includes(peerId);
+    return Object.values(state.participantPeerMap).includes(peerId);
   }
 
   async function getAgentPeer(agentId?: string): Promise<Peer> {
@@ -238,12 +248,22 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
 
     if (state.agentPeerMap[id] !== peerId) {
       state.agentPeerMap[id] = peerId;
+      // Chain off `prev.catch(...)` so a failed prior write doesn't poison the
+      // next one, but re-expose this write's own errors via the awaited lock.
       const prev = metadataWriteLock;
-      metadataWriteLock = prev.then(async () => {
+      const current = prev.catch(() => undefined).then(async () => {
         const wsMeta = await honcho.getMetadata();
         await honcho.setMetadata({ ...wsMeta, agentPeerMap: state.agentPeerMap });
-      }).catch(() => { /* errors logged elsewhere */ });
-      await metadataWriteLock;
+      });
+      metadataWriteLock = current;
+      try {
+        await current;
+      } catch (err) {
+        api.logger.error(
+          `[honcho] Failed to persist agentPeerMap for "${id}": ${err instanceof Error ? err.message : String(err)}`
+        );
+        throw err;
+      }
     }
 
     peer = await honcho.peer(peerId);

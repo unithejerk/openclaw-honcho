@@ -35,17 +35,14 @@ async function buildSessionTranscript(
   sessionId: string
 ): Promise<string> {
   await state.ensureInitialized();
-  const ownerPeer = state.ownerPeer;
-  if (!ownerPeer) {
-    throw new Error("Honcho owner peer not initialized");
-  }
 
+  const participantPeer = await state.resolveSessionParticipantPeer(sessionId);
   const agentPeer = await state.getAgentPeer(agentId);
   const session = await state.honcho.session(sessionId, { metadata: { agentId } });
   const context = await session.context({
     summary: true,
     tokens: 20000,
-    peerTarget: ownerPeer,
+    peerTarget: participantPeer,
     peerPerspective: agentPeer,
   });
 
@@ -57,11 +54,13 @@ async function buildSessionTranscript(
 
   for (const msg of context.messages ?? []) {
     const speaker =
-      msg.peerId === ownerPeer.id
+      msg.peerId === participantPeer.id
         ? "User"
         : msg.peerId === agentPeer.id
           ? `Agent(${agentId})`
-          : `Peer(${msg.peerId})`;
+          : state.isParticipantPeerId(msg.peerId)
+            ? `User(${msg.peerId})`
+            : `Peer(${msg.peerId})`;
     const ts = msg.createdAt ? ` ${msg.createdAt}` : "";
     lines.push(`## ${speaker}${ts}`, msg.content ?? "", "");
   }
@@ -126,10 +125,9 @@ export async function getHonchoMemorySearchManager(
     manager: {
       async search(query: string, opts: { maxResults?: number; sessionKey?: string } = {}) {
         await state.ensureInitialized();
-        const ownerPeer = state.ownerPeer;
-        if (!ownerPeer) {
-          throw new Error("Honcho owner peer not initialized");
-        }
+        const participantPeer = activeSessionKey
+          ? await state.resolveSessionParticipantPeer(activeSessionKey)
+          : await state.getParticipantPeer();
         const requested = Number.isFinite(opts.maxResults)
           ? Number(opts.maxResults)
           : DEFAULT_SEARCH_RESULTS;
@@ -175,7 +173,7 @@ export async function getHonchoMemorySearchManager(
           collect(await exactSession.search(query, { limit }));
 
           if (filtered.length < limit) {
-            const sessions = await ownerPeer.sessions();
+            const sessions = await participantPeer.sessions();
             for await (const session of sessions) {
               if (filtered.length >= limit) break;
               if (
@@ -189,7 +187,7 @@ export async function getHonchoMemorySearchManager(
             }
           }
         } else {
-          collect(await ownerPeer.search(query, { limit }));
+          collect(await participantPeer.search(query, { limit }));
         }
 
         return Promise.all(

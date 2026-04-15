@@ -91,8 +91,8 @@ export function registerMessageSearchTool(api: OpenClawPluginApi, state: PluginS
         // Route to the appropriate search method based on `from`
         let messages: Message[];
         if (from === "user") {
-          const humanPeer = await state.resolveSessionHumanPeer(buildSessionKey(toolCtx));
-          messages = await humanPeer.search(query, searchOpts);
+          const participantPeer = await state.resolveSessionParticipantPeer(buildSessionKey(toolCtx));
+          messages = await participantPeer.search(query, searchOpts);
         } else if (from === "agent") {
           const agentPeer = await state.getAgentPeer(toolCtx.agentId);
           messages = await agentPeer.search(query, searchOpts);
@@ -113,7 +113,7 @@ export function registerMessageSearchTool(api: OpenClawPluginApi, state: PluginS
         }
 
         const results = messages.map((msg) => {
-          const speaker = state.isHumanPeerId(msg.peerId) ? "User" : "Agent";
+          const speaker = state.isParticipantPeerId(msg.peerId) ? "User" : "Agent";
           return {
             id: msg.id,
             content: msg.content,
