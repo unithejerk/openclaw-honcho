@@ -11,7 +11,7 @@ scenarios. Single-user deployments behave the same — messages without a
 ### Added
 - **Multi-peer support for group chats (#68)**: User messages now carry per-sender attribution. `extractSenderId` parses `sender_id` (falling back to `sender`) from the leading `Conversation info (untrusted metadata):` block of an inbound message, and capture resolves a distinct Honcho peer per sender. Each participant is its own peer (the channel peer ID is used directly as the Honcho peer ID). Messages without a `sender_id` continue to go to the default owner peer, so DMs are unaffected.
 - **`-p, --peer <id>` flag on `honcho ask` and `honcho search` CLI commands**: Target a specific participant peer when querying (defaults to owner). Useful for group-chat deployments where the operator wants to inspect memory from the perspective of a single participant.
-- **Manual `peerMappings` config**: A `sender_id` → Honcho peer ID map in the plugin config. Unmapped senders still use their `sender_id` directly (no behavior change), but operators can alias platform IDs to friendlier peer IDs (or merge two channel identities onto one peer). Edits to `openclaw.json` take effect on gateway restart; the plugin does not write the file itself. See `README.md` § Peer Mappings.
+- **Manual `peerMappings` config**: A `sender_id` → Honcho peer ID map in the plugin config. Unmapped senders still use their `sender_id` directly (no behavior change), but operators can alias platform IDs to friendlier peer IDs (or merge two channel identities onto one peer). Edits to `openclaw.json` take effect on gateway restart; the plugin does not write the file itself. See `README.md` (Peer Mappings).
 - **`crossSessionSearch` in the plugin manifest (`openclaw.plugin.json`)**: The option existed in code since 1.3.0 but was missing from `configSchema`/`uiHints`, causing OpenClaw config validation to reject it. Now declared with `default: true`.
 - **Session metadata fields `participantSenderId` and `participantSenderIds`**: Capture records the last active sender (for default tool resolution) and the full set of known senders in the session. Named "sender" (not "peer") to keep raw channel IDs distinguishable from resolved Honcho peer IDs.
 - **`extractSenderId` unit tests (`helpers.test.ts`)**: Cover the happy path, missing blocks (DMs), malformed JSON, duplicate sentinels (user-pasted metadata), and `sender_id`/`sender` fallback.
@@ -27,6 +27,11 @@ scenarios. Single-user deployments behave the same — messages without a
 
 ### Migration Notes
 Historical owner-attributed messages in existing sessions are **not** rewritten. After upgrade, context queries against pre-existing sessions will show attribution mixed across the upgrade boundary — e.g., `owner said X, then real-user Y said Z` — because older turns retain their original owner attribution while new turns use per-sender peer IDs. This is acceptable; operators running multi-participant deployments should be aware.
+
+## [1.3.3] - 2026-04-16
+
+### Fixed
+- **Correct owner/agent peer routing for memory files during setup (#61)**: `MEMORY.md`, `memory/`, and `canvas/` were incorrectly routed to the owner peer — they are agent state (session logs, curated memory, working scratch), not user profile data. Only `USER.md` is genuinely about the owner. Moved `MEMORY.md` to the agent file list, renamed `OWNER_DIRS` to `AGENT_DIRS`, and restructured `scanWorkspace` so agent files and dirs are only collected when an `agentId` is known. In shared workspaces, the default agent's candidate list includes shared roots, so nothing is missed. Eliminates the previous double-collection bug where `memory/`/`canvas/` in shared roots were uploaded to both the owner and agent peers.
 
 ## [1.3.2] - 2026-04-09
 
