@@ -41,11 +41,6 @@
         "type": "boolean",
         "default": true,
         "description": "When true (default), memory_search/memory_get can return results from any session in the workspace. When false, results are scoped to the active session and its child sessions only."
-      },
-      "peerMappings": {
-        "type": "object",
-        "additionalProperties": { "type": "string" },
-        "description": "Manual map of inbound sender_id → Honcho peer ID. Unmapped senders use their sender_id directly. Edits require a gateway restart to take effect."
       }
     }
   },
@@ -91,11 +86,6 @@
       "label": "Cross-Session Search",
       "advanced": true,
       "help": "When enabled (default), memory tools can return results from any session in the workspace. Disable to scope results to the active session only."
-    },
-    "peerMappings": {
-      "label": "Peer Mappings",
-      "advanced": true,
-      "help": "Manual sender_id → Honcho peer ID mapping. Unmapped senders use their sender_id directly. Restart the gateway after edits."
     }
   }
 }

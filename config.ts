@@ -18,10 +18,6 @@ export type HonchoConfig = {
   disableDefaultNoisePatterns: boolean;
   ownerObserveOthers: boolean;
   crossSessionSearch: boolean;
-  /** Manual mapping from inbound channel sender_id → Honcho peer ID.
-   * Edited by hand in openclaw.json; re-read on gateway restart.
-   * Unmapped sender_ids fall through to using the sender_id directly. */
-  peerMappings: Record<string, string>;
 };
 
 /**
@@ -85,27 +81,6 @@ export const honchoConfigSchema = {
       disableDefaultNoisePatterns,
       ownerObserveOthers: typeof cfg.ownerObserveOthers === "boolean" ? cfg.ownerObserveOthers : false,
       crossSessionSearch: typeof cfg.crossSessionSearch === "boolean" ? cfg.crossSessionSearch : true,
-      peerMappings: parsePeerMappings(cfg.peerMappings),
     };
   },
 };
-
-/**
- * Coerce an unknown value into a sender_id → peer_id record, dropping any
- * entries whose key or value is not a non-empty trimmed string. Returns {}
- * when the input is missing or not a plain object.
- */
-function parsePeerMappings(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof k !== "string") continue;
-    const key = k.trim();
-    if (!key) continue;
-    if (typeof v !== "string") continue;
-    const val = v.trim();
-    if (!val) continue;
-    out[key] = val;
-  }
-  return out;
-}

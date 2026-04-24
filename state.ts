@@ -8,6 +8,12 @@ import { Honcho, type Peer } from "@honcho-ai/sdk";
 // @ts-ignore - resolved by openclaw runtime
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { honchoConfigSchema, type HonchoConfig } from "./config.js";
+import {
+  PeersPersister,
+  loadPeersFileSync,
+  resolvePeersFilePath,
+  resolveParticipantPeerId,
+} from "./peers.js";
 
 export const OWNER_ID = "owner";
 export const LEGACY_PEER_ID = "openclaw";
@@ -43,6 +49,10 @@ export type PluginState = {
   api: OpenClawPluginApi;
   ensureInitialized: () => Promise<void>;
   getAgentPeer: (agentId?: string) => Promise<Peer>;
+  /** Sender_id → Honcho peer_id map, backed by ~/.honcho/openclaw-peers.json.
+   * Unknown senders are auto-seeded to OWNER_ID; the user hand-edits the file
+   * to split specific senders off to their own peer IDs. */
+  peersPersister: PeersPersister;
   /** Resolve a participant peer by channel peer ID. Returns default "owner" peer if no ID given. */
   getParticipantPeer: (channelPeerId?: string) => Promise<Peer>;
   /** Resolve the participant peer for a session by reading participantSenderId from session metadata.
@@ -71,6 +81,12 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
     timeout: cfg.timeoutMs,
   });
 
+  const peersFilePath = resolvePeersFilePath();
+  const peersPersister = new PeersPersister(
+    peersFilePath,
+    loadPeersFileSync(peersFilePath),
+  );
+
   // Promise-based init lock to prevent concurrent ensureInitialized() races.
   // Without this, two concurrent hooks entering init simultaneously can corrupt
   // workspace metadata. Errors propagate to all waiters.
@@ -85,6 +101,7 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
     turnStartIndex: new Map<string, number>(),
     initialized: false,
     api,
+    peersPersister,
     ensureInitialized,
     getAgentPeer,
     getParticipantPeer,
@@ -134,25 +151,30 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
     state.initialized = true;
   }
 
-  async function getParticipantPeer(channelPeerId?: string): Promise<Peer> {
-    if (!channelPeerId) {
-      // Return default owner peer
-      let peer = state.participantPeers.get(OWNER_ID);
-      if (!peer) {
-        peer = await honcho.peer(OWNER_ID, { metadata: {} });
-        state.participantPeers.set(OWNER_ID, peer);
-      }
-      return peer;
-    }
+  async function ensureOwnerPeer(): Promise<Peer> {
+    let peer = state.participantPeers.get(OWNER_ID);
+    if (peer) return peer;
+    peer = await honcho.peer(OWNER_ID, { metadata: {} });
+    state.participantPeers.set(OWNER_ID, peer);
+    return peer;
+  }
 
-    // Cache is keyed by the inbound sender_id so lookups don't depend on
-    // whether the user has added/changed a mapping. The mapped Honcho peer
-    // ID (or the sender_id itself, when unmapped) is what's sent to the SDK.
+  async function getParticipantPeer(channelPeerId?: string): Promise<Peer> {
+    if (!channelPeerId) return ensureOwnerPeer();
+
+    // Known senders resolve via the peers file (plugin auto-seeds unknown
+    // senders to OWNER_ID; user hand-edits to split them off). Unknown
+    // senders enqueue for persistence and fall back to owner.
     let peer = state.participantPeers.get(channelPeerId);
     if (peer) return peer;
 
-    const mappedPeerId = cfg.peerMappings[channelPeerId] ?? channelPeerId;
-    peer = await honcho.peer(mappedPeerId, { metadata: { channelPeerId } });
+    const resolvedPeerId = resolveParticipantPeerId(channelPeerId, peersPersister, OWNER_ID);
+
+    if (resolvedPeerId === OWNER_ID) {
+      peer = await ensureOwnerPeer();
+    } else {
+      peer = await honcho.peer(resolvedPeerId, { metadata: { channelPeerId } });
+    }
     state.participantPeers.set(channelPeerId, peer);
     return peer;
   }
