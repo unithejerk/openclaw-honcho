@@ -162,19 +162,25 @@ export class PeersPersister {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    this.chain = this.chain.then(() => this.flush()).catch(() => undefined);
-    await this.chain;
+    const flushed = this.chain.then(() => this.flush());
+    this.chain = flushed.catch(() => undefined);
+    await flushed;
   }
 
   private async flush(): Promise<void> {
     if (!this.dirty) return;
     this.dirty = false;
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const body: PeersFile = {
-      version: PEERS_FILE_VERSION,
-      defaultUnknownPolicy: this.defaultUnknownPolicy,
-      peers: this.peers,
-    };
-    await fs.writeFile(this.filePath, JSON.stringify(body, null, 2) + "\n");
+    try {
+      await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+      const body: PeersFile = {
+        version: PEERS_FILE_VERSION,
+        defaultUnknownPolicy: this.defaultUnknownPolicy,
+        peers: this.peers,
+      };
+      await fs.writeFile(this.filePath, JSON.stringify(body, null, 2) + "\n");
+    } catch (err) {
+      this.dirty = true;
+      throw err;
+    }
   }
 }

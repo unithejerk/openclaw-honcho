@@ -184,17 +184,13 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
   }
 
   async function resolveSessionParticipantPeer(sessionKey: string): Promise<Peer> {
-    try {
-      const session = await honcho.session(sessionKey);
-      const meta = await session.getMetadata();
-      if (meta && typeof meta === "object") {
-        const senderId = (meta as Record<string, unknown>).participantSenderId;
-        if (typeof senderId === "string" && senderId.length > 0) {
-          return await getParticipantPeer(senderId);
-        }
+    const session = await honcho.session(sessionKey);
+    const meta = await session.getMetadata();
+    if (meta && typeof meta === "object") {
+      const senderId = (meta as Record<string, unknown>).participantSenderId;
+      if (typeof senderId === "string" && senderId.length > 0) {
+        return await getParticipantPeer(senderId);
       }
-    } catch {
-      // Fall through to default
     }
     return await getParticipantPeer();
   }
