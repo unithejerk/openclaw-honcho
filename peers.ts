@@ -8,8 +8,8 @@
  * Fresh installs (file missing) default to "per-sender"; pre-existing files
  * (no policy field) keep "owner" so legacy users see no behavior change.
  *
- * User can hand-edit to remap any sender. Re-read on gateway restart.
- * Path override: OPENCLAW_HONCHO_PEERS_FILE.
+ * Restart reloads from disk. Flush merges disk before write (disk wins conflicts)
+ * so concurrent file edits are not overwritten. OPENCLAW_HONCHO_PEERS_FILE overrides path.
  */
 
 import { promises as fs, readFileSync } from "node:fs";
@@ -125,15 +125,14 @@ export type PeersPersisterOptions = {
  * into a single write. Flushes are chained via a single promise so writes
  * cannot interleave.
  *
- * Note: the file is user-editable, but edits made at runtime are not picked
- * up until the gateway restarts. Existing entries are never overwritten by
- * enqueue(), so hand-edits to known senders survive; new senders added by
- * hand could be clobbered if the plugin sees them before the restart.
+ * Each flush() re-reads the file and merges `{ ...memory, ...disk }` so disk
+ * wins on conflicting sender_ids; keys only on disk or only in memory are
+ * kept. enqueue() never overwrites an existing mapping.
  */
 export class PeersPersister {
   public readonly peers: Record<string, string>;
   public readonly filePath: string;
-  public readonly defaultUnknownPolicy: DefaultUnknownPolicy;
+  public defaultUnknownPolicy: DefaultUnknownPolicy;
   private readonly debounceMs: number;
   private dirty = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -174,18 +173,50 @@ export class PeersPersister {
 
   private async flush(): Promise<void> {
     if (!this.dirty) return;
-    this.dirty = false;
-    try {
-      await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-      const body: PeersFile = {
-        version: PEERS_FILE_VERSION,
-        defaultUnknownPolicy: this.defaultUnknownPolicy,
-        peers: this.peers,
-      };
-      await fs.writeFile(this.filePath, JSON.stringify(body, null, 2) + "\n");
-    } catch (err) {
-      this.dirty = true;
-      throw err;
+    while (this.dirty) {
+      this.dirty = false;
+      try {
+        await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+        const onDisk = await loadPeersFileForMerge(this.filePath, this.defaultUnknownPolicy);
+        const mergedPeers = { ...this.peers, ...onDisk.peers };
+        this.defaultUnknownPolicy = onDisk.defaultUnknownPolicy;
+        replaceRecordInPlace(this.peers, mergedPeers);
+
+        const body: PeersFile = {
+          version: PEERS_FILE_VERSION,
+          defaultUnknownPolicy: this.defaultUnknownPolicy,
+          peers: mergedPeers,
+        };
+        await fs.writeFile(this.filePath, JSON.stringify(body, null, 2) + "\n");
+      } catch (err) {
+        this.dirty = true;
+        throw err;
+      }
     }
+  }
+}
+
+/** Sync `target` to equal `source` (same keys and values). */
+function replaceRecordInPlace(target: Record<string, string>, source: Record<string, string>): void {
+  for (const k of Object.keys(target)) {
+    if (!(k in source)) delete target[k];
+  }
+  Object.assign(target, source);
+}
+
+/**
+ * Same as reading the peers file for parsing, except a missing file uses
+ * `memoryPolicy` instead of the fresh-install default (`per-sender`), so the
+ * first write does not clobber the policy loaded at boot from an in-memory-only state.
+ */
+async function loadPeersFileForMerge(filePath: string, memoryPolicy: DefaultUnknownPolicy): Promise<PeersFile> {
+  try {
+    return parsePeersJson(await fs.readFile(filePath, "utf8"), filePath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") {
+      return { version: PEERS_FILE_VERSION, defaultUnknownPolicy: memoryPolicy, peers: {} };
+    }
+    return { version: PEERS_FILE_VERSION, defaultUnknownPolicy: "owner", peers: {} };
   }
 }

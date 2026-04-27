@@ -238,4 +238,84 @@ describe("PeersPersister", () => {
     await p.flushNow();
     await expect(fs.access(file)).rejects.toBeTruthy();
   });
+
+  it("merge preserves hand-edited keys on disk not present in memory", async () => {
+    const dir = await mktmp();
+    const file = path.join(dir, "peers.json");
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        defaultUnknownPolicy: "owner",
+        peers: { "slack:U99": "alice", "slack:U1": "owner" },
+      }) + "\n",
+    );
+
+    const loaded = loadPeersFileSync(file);
+    const p = new PeersPersister(file, loaded, { debounceMs: 10 });
+    p.enqueue("slack:Unew", "slack_Unew");
+    await p.flushNow();
+
+    const body = JSON.parse(await fs.readFile(file, "utf8"));
+    expect(body.peers["slack:U99"]).toBe("alice");
+    expect(body.peers["slack:Unew"]).toBe("slack_Unew");
+    expect(body.peers["slack:U1"]).toBe("owner");
+  });
+
+  it("merge prefers on-disk mapping when the same sender exists in memory", async () => {
+    const dir = await mktmp();
+    const file = path.join(dir, "peers.json");
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        defaultUnknownPolicy: "owner",
+        peers: { "slack:U1": "from_disk" },
+      }) + "\n",
+    );
+
+    const loaded = loadPeersFileSync(file);
+    const p = new PeersPersister(file, loaded, { debounceMs: 10 });
+    expect(p.peers["slack:U1"]).toBe("from_disk");
+    (p.peers as Record<string, string>)["slack:U1"] = "stale_memory";
+    p.enqueue("slack:U2", "owner");
+    await p.flushNow();
+
+    const body = JSON.parse(await fs.readFile(file, "utf8"));
+    expect(body.peers["slack:U1"]).toBe("from_disk");
+    expect(p.peers["slack:U1"]).toBe("from_disk");
+  });
+
+  it("reloads defaultUnknownPolicy from disk on flush", async () => {
+    const dir = await mktmp();
+    const file = path.join(dir, "peers.json");
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        defaultUnknownPolicy: "owner",
+        peers: {},
+      }) + "\n",
+    );
+
+    const loaded = loadPeersFileSync(file);
+    const p = new PeersPersister(file, loaded, { debounceMs: 10 });
+    expect(p.defaultUnknownPolicy).toBe("owner");
+
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        defaultUnknownPolicy: "per-sender",
+        peers: {},
+      }) + "\n",
+    );
+
+    p.enqueue("slack:Ux", "derived");
+    await p.flushNow();
+
+    expect(p.defaultUnknownPolicy).toBe("per-sender");
+    const body = JSON.parse(await fs.readFile(file, "utf8"));
+    expect(body.defaultUnknownPolicy).toBe("per-sender");
+  });
 });

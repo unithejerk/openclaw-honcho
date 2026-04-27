@@ -112,7 +112,7 @@ Set `ownerObserveOthers: true` to let the owner peer also observe agent messages
 
 ### Peer Mappings
 
-The plugin maintains a `sender_id` → Honcho peer ID map at `~/.honcho/openclaw-peers.json` (override the path with `OPENCLAW_HONCHO_PEERS_FILE`). The file is auto-seeded as new senders appear, hand-editable, and re-read on gateway restart. To alias a platform-specific sender ID to a friendlier Honcho peer (or merge two channel identities into one), edit the `peers` map:
+Map `sender_id` → Honcho peer ID in `~/.honcho/openclaw-peers.json` (override with `OPENCLAW_HONCHO_PEERS_FILE`). New senders are added automatically; edit `peers` to alias or merge identities, then **`openclaw gateway restart`** so the gateway reloads the file.
 
 ```json
 {
@@ -128,7 +128,7 @@ The plugin maintains a `sender_id` → Honcho peer ID map at `~/.honcho/openclaw
 - **`defaultUnknownPolicy`** controls how unknown `sender_id`s are seeded into `peers`:
   - `per-sender` — default for fresh installs. Each new sender becomes its own peer; the seeded peer ID is the `sender_id` sanitized to `[A-Za-z0-9_-]` and truncated to Honcho's 100-char limit.
   - `owner` — default for pre-existing files missing the field (preserves legacy behavior). All unknown senders merge into the owner peer.
-- **Auto-seeded, manually overridable.** The plugin only inserts entries for senders not already in the map, so hand-edits to known senders survive. Edits take effect on gateway restart (`openclaw gateway restart`).
+- **Auto-seeded, manually overridable.** The plugin only adds entries for senders not already in the map.
 - **Adding a mapping after messages exist splits history.** Messages already stored under the original peer stay there; new messages land under the new peer. Remap before the peer accumulates history.
 
 ### Multi-Peer Participants
