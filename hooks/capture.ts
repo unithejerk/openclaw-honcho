@@ -7,30 +7,9 @@ import {
   isSubagentSession,
   extractMessages,
   extractSenderId,
+  getRawContent,
 } from "../helpers.js";
 import { subagentParentMap } from "./subagent.js";
-
-/**
- * Extract raw text content from a message object (before cleaning).
- */
-function getRawContent(msg: unknown): string {
-  if (!msg || typeof msg !== "object") return "";
-  const m = msg as Record<string, unknown>;
-  if (typeof m.content === "string") return m.content;
-  if (Array.isArray(m.content)) {
-    return m.content
-      .filter(
-        (block: unknown) =>
-          typeof block === "object" &&
-          block !== null &&
-          (block as Record<string, unknown>).type === "text"
-      )
-      .map((block: unknown) => (block as Record<string, unknown>).text)
-      .filter((t): t is string => typeof t === "string")
-      .join("\n");
-  }
-  return "";
-}
 
 /**
  * Core message capture logic shared by agent_end, before_compaction, and before_reset.

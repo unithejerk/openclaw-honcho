@@ -4,6 +4,26 @@
 
 import type { Peer, MessageInput } from "@honcho-ai/sdk";
 
+type ContentBlock = { type?: string; text?: unknown };
+type RawMessage = { role?: string; content?: string | ContentBlock[]; timestamp?: number };
+
+/**
+ * Extract plain text from a message's `content` (string or array of content blocks).
+ * Returns "" for non-message inputs or messages with no text blocks.
+ */
+export function getRawContent(msg: unknown): string {
+  if (!msg || typeof msg !== "object") return "";
+  const { content } = msg as RawMessage;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((b): b is ContentBlock & { text: string } =>
+      !!b && b.type === "text" && typeof b.text === "string",
+    )
+    .map((b) => b.text)
+    .join("\n");
+}
+
 /**
  * Build a Honcho session key from OpenClaw context.
  * Combines sessionKey + messageProvider to create unique sessions per platform.
@@ -224,22 +244,7 @@ export function extractMessages(
 
     if (role !== "user" && role !== "assistant") continue;
 
-    // Extract raw content before cleaning
-    let rawContent = "";
-    if (typeof m.content === "string") {
-      rawContent = m.content;
-    } else if (Array.isArray(m.content)) {
-      rawContent = m.content
-        .filter(
-          (block: unknown) =>
-            typeof block === "object" &&
-            block !== null &&
-            (block as Record<string, unknown>).type === "text"
-        )
-        .map((block: unknown) => (block as Record<string, unknown>).text)
-        .filter((t): t is string => typeof t === "string")
-        .join("\n");
-    }
+    const rawContent = getRawContent(msg);
 
     // For user messages, extract sender ID before cleaning strips metadata
     let peer: Peer;
