@@ -2,6 +2,11 @@
 
 All notable changes to `@honcho-ai/openclaw-honcho` will be documented in this file.
 
+## [1.4.1] - 2026-04-29
+
+### Fixed
+- **ClawHub packaging**: Include compiled `dist/` output in ClawHub archive so the plugin loads correctly after install.
+
 ## [1.4.0] - 2026-04-27
 
 Per-sender participant peers when the channel emits `sender_id` (group chats
