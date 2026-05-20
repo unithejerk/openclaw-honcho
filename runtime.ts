@@ -205,7 +205,7 @@ export async function getHonchoMemorySearchManager(
           ? Number(opts.maxResults)
           : DEFAULT_SEARCH_RESULTS;
         const limit = Math.min(MAX_SEARCH_RESULTS, Math.max(1, Math.trunc(requested)));
-        const requestedSessionKey =          typeof opts.sessionKey === "string" && opts.sessionKey.length > 0
+        requestedSessionKey =          typeof opts.sessionKey === "string" && opts.sessionKey.length > 0
             ? opts.sessionKey
             : activeSessionKey ?? null;
         const scopeEnabled = !state.cfg.crossSessionSearch;
