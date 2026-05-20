@@ -143,7 +143,7 @@ export async function getHonchoMemorySearchManager(
   /** Run qmd via CLI and parse results into memory-search shape. */
   function qmdSearch(query: string, limit: number): Array<Record<string, unknown>> | null {
     try {
-      const stdout = execFileSync(qmdCommand(), [qmdSearchMode(), JSON.stringify(query), "--json", "-n", String(limit)], {
+      const stdout = execFileSync(qmdCommand(), [qmdSearchMode(), query, "--json", "-n", String(limit)], {
         encoding: "utf-8",
         timeout: 30000,
         stdio: ["pipe", "pipe", "ignore"],
