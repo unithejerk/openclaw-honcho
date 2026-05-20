@@ -1,10 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { getHonchoMemorySearchManager } from "../runtime.js";
 import type { PluginState } from "../state.js";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
-// Mock child_process.execSync
+// Mock child_process.execFileSync
 vi.mock("child_process", () => ({
+  execFileSync: vi.fn(),
   execSync: vi.fn(),
 }));
 
@@ -152,15 +153,16 @@ describe("QMD bridge — search", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("maps qmd JSON fields to memory-search shape", async () => {
-    (execSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
 
     const state = createState({ memory: createMemoryConfig() });
     const { manager } = await getHonchoMemorySearchManager(state, { agentId: "main" });
 
     const results = await manager.search("basc3", { maxResults: 5 });
 
-    expect(execSync).toHaveBeenCalledWith(
-      expect.stringContaining("qmd query"),
+    expect(execFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("qmd"),
+      expect.arrayContaining(["query"]),
       expect.objectContaining({ timeout: 30000 }),
     );
 
@@ -174,49 +176,52 @@ describe("QMD bridge — search", () => {
   });
 
   it("uses configured searchMode for the subprocess command", async () => {
-    (execSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
 
     const state = createState({ memory: createMemoryConfig({ searchMode: "vsearch" }) });
     const { manager } = await getHonchoMemorySearchManager(state, { agentId: "main" });
 
     await manager.search("basc3", { maxResults: 1 });
 
-    expect(execSync).toHaveBeenCalledWith(
-      expect.stringContaining("vsearch"),
+    expect(execFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("qmd"),
+      expect.arrayContaining(["vsearch"]),
       expect.any(Object),
     );
   });
 
   it("uses qmd binary path from config", async () => {
-    (execSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
 
     const state = createState({ memory: createMemoryConfig({ command: "/custom/qmd" }) });
     const { manager } = await getHonchoMemorySearchManager(state, { agentId: "main" });
 
     await manager.search("basc3", { maxResults: 1 });
 
-    expect(execSync).toHaveBeenCalledWith(
+    expect(execFileSync).toHaveBeenCalledWith(
       expect.stringContaining("/custom/qmd"),
+      expect.any(Array),
       expect.any(Object),
     );
   });
 
   it("defaults to qmd on PATH when command is not configured", async () => {
-    (execSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
 
     const state = createState({ memory: createMemoryConfig({ command: undefined }) });
     const { manager } = await getHonchoMemorySearchManager(state, { agentId: "main" });
 
     await manager.search("basc3", { maxResults: 1 });
 
-    expect(execSync).toHaveBeenCalledWith(
-      expect.stringContaining("qmd query"),
+    expect(execFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("qmd"),
+      expect.any(Array),
       expect.any(Object),
     );
   });
 
   it("falls through when qmd search throws", async () => {
-    (execSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
+    (execFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
       throw new Error("QMD not found");
     });
 
@@ -240,7 +245,7 @@ describe("QMD bridge — readFile", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("reads qmd:// paths via qmd get", async () => {
-    (execSync as ReturnType<typeof vi.fn>).mockReturnValue("# BASC-3 Report\nContent\n");
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue("# BASC-3 Report\nContent\n");
 
     const state = createState({ memory: createMemoryConfig() });
     const { manager } = await getHonchoMemorySearchManager(state, { agentId: "main" });
@@ -249,8 +254,9 @@ describe("QMD bridge — readFile", () => {
       relPath: "qmd://wiki-memory/assessments/basc3.md",
     });
 
-    expect(execSync).toHaveBeenCalledWith(
-      expect.stringContaining("qmd get"),
+    expect(execFileSync).toHaveBeenCalledWith(
+      expect.stringContaining("qmd"),
+      expect.arrayContaining(["get"]),
       expect.any(Object),
     );
     expect(file.path).toBe("qmd://wiki-memory/assessments/basc3.md");
@@ -259,7 +265,7 @@ describe("QMD bridge — readFile", () => {
   });
 
   it("throws on qmd:// path when qmd get fails", async () => {
-    (execSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
+    (execFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => {
       throw new Error("qmd get failed");
     });
 
@@ -279,7 +285,7 @@ describe("QMD bridge — score clamping", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("clamps session scores to 0.5 in merged results", async () => {
-    (execSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
+    (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(QMD_RESPONSE);
 
     const state = createState({ memory: createMemoryConfig() });
     const { manager } = await getHonchoMemorySearchManager(state, {

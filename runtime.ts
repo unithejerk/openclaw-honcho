@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { buildSessionKey } from "./helpers.js";
 import { isLocalHonchoBaseUrl, type PluginState } from "./state.js";
 
@@ -143,7 +143,7 @@ export async function getHonchoMemorySearchManager(
   /** Run qmd via CLI and parse results into memory-search shape. */
   function qmdSearch(query: string, limit: number): Array<Record<string, unknown>> | null {
     try {
-      const stdout = execSync(`${qmdCommand()} ${qmdSearchMode()} ${JSON.stringify(query)} --json -n ${limit}`, {
+      const stdout = execFileSync(qmdCommand(), [qmdSearchMode(), JSON.stringify(query), "--json", "-n", String(limit)], {
         encoding: "utf-8",
         timeout: 30000,
         stdio: ["pipe", "pipe", "ignore"],
@@ -167,7 +167,7 @@ export async function getHonchoMemorySearchManager(
   /** Run qmd get via CLI and return raw file content. */
   function qmdGet(path: string): string | null {
     try {
-      const stdout = execSync(`${qmdCommand()} get ${JSON.stringify(path)}`, {
+      const stdout = execFileSync(qmdCommand(), ["get", path], {
         encoding: "utf-8",
         timeout: 30000,
         stdio: ["pipe", "pipe", "ignore"],
@@ -181,12 +181,6 @@ export async function getHonchoMemorySearchManager(
   return {
     manager: {
       async search(query: string, opts: { maxResults?: number; sessionKey?: string } = {}) {
-        await state.ensureInitialized();
-        let requestedSessionKey =
-          typeof opts.sessionKey === "string" && opts.sessionKey.length > 0
-            ? opts.sessionKey
-            : activeSessionKey ?? null;
-
         // Always try QMD in parallel when configured
         const qmdPromise = isQmdConfigured()
           ? Promise.resolve().then(() => {
@@ -205,7 +199,7 @@ export async function getHonchoMemorySearchManager(
           ? Number(opts.maxResults)
           : DEFAULT_SEARCH_RESULTS;
         const limit = Math.min(MAX_SEARCH_RESULTS, Math.max(1, Math.trunc(requested)));
-        requestedSessionKey =          typeof opts.sessionKey === "string" && opts.sessionKey.length > 0
+        const requestedSessionKey =          typeof opts.sessionKey === "string" && opts.sessionKey.length > 0
             ? opts.sessionKey
             : activeSessionKey ?? null;
         const scopeEnabled = !state.cfg.crossSessionSearch;
