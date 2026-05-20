@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import { buildSessionKey } from "./helpers.js";
 import { isLocalHonchoBaseUrl, type PluginState } from "./state.js";
 
@@ -123,9 +124,79 @@ export async function getHonchoMemorySearchManager(
 
   await state.ensureInitialized();
 
+  /** Check if QMD backend is configured in OpenClaw config. */
+  function isQmdConfigured(): boolean {
+    const mem = state.api?.config?.memory;
+    return !!(mem?.backend === "qmd" && mem?.qmd);
+  }
+
+  /** Read the QMD search mode from config (search | vsearch | query), defaulting to query. */
+  function qmdSearchMode(): string {
+    return state.api?.config?.memory?.qmd?.searchMode || "query";
+  }
+
+  /** Read the QMD binary path from config, or fall back to PATH. */
+  function qmdCommand(): string {
+    return state.api?.config?.memory?.qmd?.command || "qmd";
+  }
+
+  /** Run qmd via CLI and parse results into memory-search shape. */
+  function qmdSearch(query: string, limit: number): Array<Record<string, unknown>> | null {
+    try {
+      const stdout = execSync(`${qmdCommand()} ${qmdSearchMode()} ${JSON.stringify(query)} --json -n ${limit}`, {
+        encoding: "utf-8",
+        timeout: 30000,
+        stdio: ["pipe", "pipe", "ignore"],
+      });
+      const raw = JSON.parse(stdout.trim());
+      if (!Array.isArray(raw)) return null;
+      return raw.map((r: Record<string, unknown>) => ({
+        path: r.file ?? r.path ?? "",
+        startLine: r.line ?? r.startLine ?? 1,
+        endLine: r.line ?? r.endLine ?? 1,
+        score: r.score ?? 0,
+        snippet: r.snippet ?? "",
+        title: r.title ?? "",
+        source: "qmd",
+      }));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Run qmd get via CLI and return raw file content. */
+  function qmdGet(path: string): string | null {
+    try {
+      const stdout = execSync(`${qmdCommand()} get ${JSON.stringify(path)}`, {
+        encoding: "utf-8",
+        timeout: 30000,
+        stdio: ["pipe", "pipe", "ignore"],
+      });
+      return stdout;
+    } catch {
+      return null;
+    }
+  }
+
   return {
     manager: {
       async search(query: string, opts: { maxResults?: number; sessionKey?: string } = {}) {
+        await state.ensureInitialized();
+        let requestedSessionKey =
+          typeof opts.sessionKey === "string" && opts.sessionKey.length > 0
+            ? opts.sessionKey
+            : activeSessionKey ?? null;
+
+        // Always try QMD in parallel when configured
+        const qmdPromise = isQmdConfigured()
+          ? Promise.resolve().then(() => {
+              const r = Number.isFinite(opts.maxResults)
+                ? Number(opts.maxResults)
+                : DEFAULT_SEARCH_RESULTS;
+              const l = Math.min(MAX_SEARCH_RESULTS, Math.max(1, Math.trunc(r)));
+              return qmdSearch(query, l);
+            }).catch(() => null)
+          : Promise.resolve(null);
         await state.ensureInitialized();
         const participantPeer = activeSessionKey
           ? await state.resolveSessionParticipantPeer(activeSessionKey)
@@ -134,8 +205,7 @@ export async function getHonchoMemorySearchManager(
           ? Number(opts.maxResults)
           : DEFAULT_SEARCH_RESULTS;
         const limit = Math.min(MAX_SEARCH_RESULTS, Math.max(1, Math.trunc(requested)));
-        const requestedSessionKey =
-          typeof opts.sessionKey === "string" && opts.sessionKey.length > 0
+        const requestedSessionKey =          typeof opts.sessionKey === "string" && opts.sessionKey.length > 0
             ? opts.sessionKey
             : activeSessionKey ?? null;
         const scopeEnabled = !state.cfg.crossSessionSearch;
@@ -177,7 +247,9 @@ export async function getHonchoMemorySearchManager(
           collect(await participantPeer.search(query, { limit }));
         }
 
-        return Promise.all(
+        // Merge QMD results (with real scores) above Honcho session results (clamped)
+        const [qmdResults] = await Promise.all([qmdPromise]);
+        const honchoResults = await Promise.all(
           filtered.map(async (msg: any) => {
             const snippet = typeof msg.content === "string" ? msg.content : "";
             let transcriptPromise = transcriptCache.get(msg.sessionId);
@@ -197,34 +269,59 @@ export async function getHonchoMemorySearchManager(
             };
           })
         );
+        const clampedSessions = honchoResults.map((r) => ({ ...r, score: Math.min(r.score, 0.5) }));
+        const merged =
+          qmdResults && qmdResults.length > 0
+            ? [...qmdResults, ...clampedSessions].slice(0, limit)
+            : clampedSessions;
+        return merged;
       },
 
       async readFile(params: { relPath: string; from?: number; lines?: number }) {
-        const sessionId = parseSessionPath(params.relPath);
+        const relPath = params.relPath;
+        // Handle qmd:// paths by delegating to qmd get
+        if (typeof relPath === "string" && relPath.startsWith("qmd://")) {
+          const qmdText = qmdGet(relPath);
+          if (qmdText !== null) {
+            return {
+              path: relPath,
+              text: sliceLines(qmdText, params.from, params.lines),
+              source: "qmd",
+            };
+          }
+          throw new Error(`Unsupported Honcho memory path: ${relPath}`);
+        }
+        const sessionId = parseSessionPath(relPath);
         if (!sessionId) {
-          throw new Error(`Unsupported Honcho memory path: ${params.relPath}`);
+          throw new Error(`Unsupported Honcho memory path: ${relPath}`);
         }
         if (!state.cfg.crossSessionSearch && activeSessionKey && !matchesSessionScope(sessionId, activeSessionKey)) {
-          throw new Error(`Requested Honcho memory path is outside the active session: ${params.relPath}`);
+          throw new Error(`Requested Honcho memory path is outside the active session: ${relPath}`);
         }
 
         const transcript = await buildSessionTranscript(state, agentId, sessionId);
         return {
-          path: params.relPath,
+          path: relPath,
           text: sliceLines(transcript, params.from, params.lines),
         };
       },
 
       status() {
+        const qmdAvailable = isQmdConfigured();
         return {
           backend: "qmd",
-          provider: isLocalHonchoBaseUrl(state.cfg.baseUrl) ? "honcho-selfhosted" : "honcho",
+          provider: qmdAvailable
+            ? "honcho+qmd"
+            : isLocalHonchoBaseUrl(state.cfg.baseUrl)
+              ? "honcho-selfhosted"
+              : "honcho",
           model: "n/a",
-          sources: ["sessions"],
+          sources: qmdAvailable ? ["sessions", "qmd"] : ["sessions"],
           custom: {
             searchMode: "semantic",
             workspaceId: state.cfg.workspaceId,
             baseUrl: state.cfg.baseUrl,
+            ...(qmdAvailable ? { qmd: true } : {}),
           },
         };
       },
