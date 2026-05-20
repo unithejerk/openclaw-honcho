@@ -180,6 +180,7 @@ export async function getHonchoMemorySearchManager(
 
   return {
     manager: {
+      /** Search across QMD-indexed files and Honcho session transcripts, merging results. */
       async search(query: string, opts: { maxResults?: number; sessionKey?: string } = {}) {
         // Always try QMD in parallel when configured
         const qmdPromise = isQmdConfigured()
@@ -271,6 +272,7 @@ export async function getHonchoMemorySearchManager(
         return merged;
       },
 
+      /** Read a file from QMD (qmd:// paths) or a Honcho session transcript. */
       async readFile(params: { relPath: string; from?: number; lines?: number }) {
         const relPath = params.relPath;
         // Handle qmd:// paths by delegating to qmd get
@@ -300,6 +302,7 @@ export async function getHonchoMemorySearchManager(
         };
       },
 
+      /** Return status descriptor including QMD availability and provider info. */
       status() {
         const qmdAvailable = isQmdConfigured();
         return {
