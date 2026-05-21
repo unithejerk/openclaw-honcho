@@ -153,10 +153,6 @@ describe("QMD bridge — config detection", () => {
   });
 
   it("returns honcho+qmd when qmd block exists (even empty)", async () => {
-    const state = createState({ memory: createMemoryConfig({ command: undefined, searchMode: undefined }) });
-    // Empty qmd block — isQmdConfigured checks mem?.qmd truthiness
-    // But qmd is { includeDefaultMemory: true } which is truthy
-    // So for this test, set qmd to {}
     const memState = createState({ memory: { backend: "qmd", qmd: {} } });
     const { manager } = await getHonchoMemorySearchManager(memState, { agentId: "main" });
     const s = manager.status();
