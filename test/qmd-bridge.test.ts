@@ -293,7 +293,7 @@ describe("QMD bridge — readFile", () => {
 
     await expect(
       manager.readFile({ relPath: "qmd://wiki-memory/missing.md" }),
-    ).rejects.toThrow(/Unsupported Honcho memory path/);
+    ).rejects.toThrow(/Failed to retrieve qmd:\/\/ path/);
   });
 
   it("rejects disallowed qmd:// paths when allowedPrefixes are configured", async () => {

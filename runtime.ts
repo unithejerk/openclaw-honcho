@@ -321,7 +321,7 @@ export async function getHonchoMemorySearchManager(
               source: "qmd",
             };
           }
-          throw new Error(`Unsupported Honcho memory path: ${relPath}`);
+          throw new Error(`Failed to retrieve qmd:// path: ${relPath} - qmd CLI returned no content`);
         }
         const sessionId = parseSessionPath(relPath);
         if (!sessionId) {
