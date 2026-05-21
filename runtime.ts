@@ -1,4 +1,4 @@
-import { execFileSync } from "child_process";
+import { execFile } from "child_process";
 import { buildSessionKey } from "./helpers.js";
 import { isLocalHonchoBaseUrl, type PluginState } from "./state.js";
 
@@ -140,14 +140,39 @@ export async function getHonchoMemorySearchManager(
     return state.api?.config?.memory?.qmd?.command || "qmd";
   }
 
-  /** Run qmd via CLI and parse results into memory-search shape. */
-  function qmdSearch(query: string, limit: number): Array<Record<string, unknown>> | null {
+  /** Run qmd via CLI with timeout and return stdout, or null on failure. */
+  async function runQmdCli(args: string[]): Promise<string | null> {
     try {
-      const stdout = execFileSync(qmdCommand(), [qmdSearchMode(), query, "--json", "-n", String(limit)], {
-        encoding: "utf-8",
-        timeout: 30000,
-        stdio: ["pipe", "pipe", "ignore"],
+      const stdout = await new Promise<string>((resolve, reject) => {
+        execFile(
+          qmdCommand(),
+          args,
+          {
+            encoding: "utf-8",
+            signal: AbortSignal.timeout(30000),
+          },
+          (err, out) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve(out);
+          }
+        );
       });
+      return stdout;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Run qmd via CLI and parse results into memory-search shape. */
+  async function qmdSearch(query: string, limit: number): Promise<Array<Record<string, unknown>> | null> {
+    const stdout = await runQmdCli([qmdSearchMode(), query, "--json", "-n", String(limit)]);
+    if (stdout === null) {
+      return null;
+    }
+    try {
       const raw = JSON.parse(stdout.trim());
       if (!Array.isArray(raw)) return null;
       return raw.map((r: Record<string, unknown>) => ({
@@ -165,17 +190,8 @@ export async function getHonchoMemorySearchManager(
   }
 
   /** Run qmd get via CLI and return raw file content. */
-  function qmdGet(path: string): string | null {
-    try {
-      const stdout = execFileSync(qmdCommand(), ["get", path], {
-        encoding: "utf-8",
-        timeout: 30000,
-        stdio: ["pipe", "pipe", "ignore"],
-      });
-      return stdout;
-    } catch {
-      return null;
-    }
+  async function qmdGet(path: string): Promise<string | null> {
+    return runQmdCli(["get", path]);
   }
 
   return {
@@ -184,13 +200,17 @@ export async function getHonchoMemorySearchManager(
       async search(query: string, opts: { maxResults?: number; sessionKey?: string } = {}) {
         // Always try QMD in parallel when configured
         const qmdPromise = isQmdConfigured()
-          ? Promise.resolve().then(() => {
-              const r = Number.isFinite(opts.maxResults)
-                ? Number(opts.maxResults)
-                : DEFAULT_SEARCH_RESULTS;
-              const l = Math.min(MAX_SEARCH_RESULTS, Math.max(1, Math.trunc(r)));
-              return qmdSearch(query, l);
-            }).catch(() => null)
+          ? (async () => {
+              try {
+                const r = Number.isFinite(opts.maxResults)
+                  ? Number(opts.maxResults)
+                  : DEFAULT_SEARCH_RESULTS;
+                const l = Math.min(MAX_SEARCH_RESULTS, Math.max(1, Math.trunc(r)));
+                return await qmdSearch(query, l);
+              } catch {
+                return null;
+              }
+            })()
           : Promise.resolve(null);
         await state.ensureInitialized();
         const participantPeer = activeSessionKey
@@ -277,7 +297,7 @@ export async function getHonchoMemorySearchManager(
         const relPath = params.relPath;
         // Handle qmd:// paths by delegating to qmd get
         if (typeof relPath === "string" && relPath.startsWith("qmd://")) {
-          const qmdText = qmdGet(relPath);
+          const qmdText = await qmdGet(relPath);
           if (qmdText !== null) {
             return {
               path: relPath,
