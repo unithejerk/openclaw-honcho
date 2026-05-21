@@ -140,6 +140,15 @@ export async function getHonchoMemorySearchManager(
     return state.api?.config?.memory?.qmd?.command || "qmd";
   }
 
+  /** Optional QMD path allowlist (qmd:// prefixes). Null means allow all paths. */
+  function qmdAllowedPrefixes(): string[] | null {
+    const prefixes = state.api?.config?.memory?.qmd?.allowedPrefixes;
+    if (!Array.isArray(prefixes)) {
+      return null;
+    }
+    return prefixes.filter((prefix): prefix is string => typeof prefix === "string");
+  }
+
   /** Run qmd via CLI with timeout and return stdout, or null on failure. */
   async function runQmdCli(args: string[]): Promise<string | null> {
     try {
@@ -297,6 +306,13 @@ export async function getHonchoMemorySearchManager(
         const relPath = params.relPath;
         // Handle qmd:// paths by delegating to qmd get
         if (typeof relPath === "string" && relPath.startsWith("qmd://")) {
+          const allowedPrefixes = qmdAllowedPrefixes();
+          if (
+            allowedPrefixes &&
+            !allowedPrefixes.some((prefix) => relPath.startsWith(prefix))
+          ) {
+            throw new Error(`QMD memory path is not allowed by configured prefixes: ${relPath}`);
+          }
           const qmdText = await qmdGet(relPath);
           if (qmdText !== null) {
             return {

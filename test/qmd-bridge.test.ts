@@ -295,6 +295,34 @@ describe("QMD bridge — readFile", () => {
       manager.readFile({ relPath: "qmd://wiki-memory/missing.md" }),
     ).rejects.toThrow(/Unsupported Honcho memory path/);
   });
+
+  it("rejects disallowed qmd:// paths when allowedPrefixes are configured", async () => {
+    mockExecFileSuccess("# Should not be read\n");
+
+    const state = createState({
+      memory: createMemoryConfig({ allowedPrefixes: ["qmd://wiki-memory/allowed/"] }),
+    });
+    const { manager } = await getHonchoMemorySearchManager(state, { agentId: "main" });
+
+    await expect(
+      manager.readFile({ relPath: "qmd://wiki-memory/assessments/basc3.md" }),
+    ).rejects.toThrow(/not allowed by configured prefixes/);
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it("allows qmd:// paths when allowedPrefixes are not configured", async () => {
+    mockExecFileSuccess("# BASC-3 Report\nContent\n");
+
+    const state = createState({ memory: createMemoryConfig({ allowedPrefixes: undefined }) });
+    const { manager } = await getHonchoMemorySearchManager(state, { agentId: "main" });
+
+    await expect(
+      manager.readFile({ relPath: "qmd://wiki-memory/assessments/basc3.md" }),
+    ).resolves.toMatchObject({
+      path: "qmd://wiki-memory/assessments/basc3.md",
+      source: "qmd",
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
