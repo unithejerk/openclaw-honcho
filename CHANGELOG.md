@@ -2,6 +2,11 @@
 
 All notable changes to `@honcho-ai/openclaw-honcho` will be documented in this file.
 
+## [1.5.1] - 2026-05-21
+
+### Fixed
+- **ClawHub display name (#101)**: Re-publish to ClawHub so the package picks up the `name: "Honcho Memory"` field added to `openclaw.plugin.json`. Previous 1.5.0 ClawHub artifact was built from a commit that predated the display-name addition and showed no display name in `clawhub package inspect`.
+
 ## [1.5.0] - 2026-05-15
 
 ### Changed
