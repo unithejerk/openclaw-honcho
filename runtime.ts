@@ -142,7 +142,8 @@ export async function getHonchoMemorySearchManager(
 
   /** Optional QMD path allowlist (qmd:// prefixes). Null means allow all paths. */
   function qmdAllowedPrefixes(): string[] | null {
-    const prefixes = state.api?.config?.memory?.qmd?.allowedPrefixes;
+    const cfg = state.api?.config?.memory?.qmd as Record<string, unknown> | undefined;
+    const prefixes = cfg?.allowedPrefixes;
     if (!Array.isArray(prefixes)) {
       return null;
     }
@@ -267,7 +268,7 @@ export async function getHonchoMemorySearchManager(
             metadata: { agentId },
           });
           collect(await exactSession.search(query, { limit }));
-        } else {
+        } else if (filtered.length < limit) {
           collect(await participantPeer.search(query, { limit }));
         }
 
