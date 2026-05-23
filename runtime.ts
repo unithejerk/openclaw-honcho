@@ -126,8 +126,7 @@ export async function getHonchoMemorySearchManager(
 
   /** Check if QMD backend is configured in OpenClaw config. */
   function isQmdConfigured(): boolean {
-    const mem = state.api?.config?.memory;
-    return !!(mem?.backend === "qmd" && mem?.qmd);
+    return state.api?.config?.memory?.backend === "qmd";
   }
 
   /** Read the QMD search mode from config (search | vsearch | query), defaulting to query. */
