@@ -163,6 +163,7 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
     if (peer) return peer;
     peer = await honcho.peer(OWNER_ID, { metadata: {} });
     state.participantPeers.set(OWNER_ID, peer);
+    participantPeerIdCache = null;
     return peer;
   }
 
@@ -180,7 +181,7 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
     let resolvedPeerId = resolveParticipantPeerId(channelPeerId, peersPersister, OWNER_ID);
     // Guard against empty sanitized peer IDs (e.g. sender_id is all non-alphanumeric)
     if (!resolvedPeerId || resolvedPeerId.length === 0) {
-      resolvedPeerId = `sender-${createHash("sha256").update(channelPeerId).digest("hex").slice(0, 16)}`;
+      resolvedPeerId = `sender_${createHash("sha256").update(channelPeerId).digest("base64url").slice(0, 32)}`;
     }
     const autoSeeded = !wasInFile && resolvedPeerId !== OWNER_ID;
 
@@ -192,6 +193,7 @@ export function createPluginState(api: OpenClawPluginApi): PluginState {
       peer = await honcho.peer(resolvedPeerId, { metadata });
     }
     state.participantPeers.set(channelPeerId, peer);
+    participantPeerIdCache = null;
     return peer;
   }
 

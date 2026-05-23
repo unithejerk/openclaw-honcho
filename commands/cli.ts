@@ -489,7 +489,7 @@ export function registerCli(api: OpenClawPluginApi, state: PluginState): void {
             const participantPeer = await state.getParticipantPeer(options.peer);
             const topK = parseInt(options.topK, 10);
             const maxDistance = parseFloat(options.maxDistance);
-            const searchTopK = Number.isFinite(topK) && topK > 0 ? topK : 10;
+            const searchTopK = Number.isFinite(topK) && topK > 0 ? Math.min(topK, 100) : 10;
             const searchMaxDistance = Number.isFinite(maxDistance) && maxDistance >= 0 && maxDistance <= 1 ? maxDistance : 0.5;
             const representation = await participantPeer.representation({
               searchQuery: query,
